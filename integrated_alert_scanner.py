@@ -22,7 +22,7 @@ EMA_CONFIG = {
     'short_ema': 20,
     'long_ema': 50,
     'filter_ema': 200,
-    'lookback_days': 1,  # Check last 1 days for crossover
+    'lookback_days': 5,  # Check last 5 days for crossover
     'volume_multiplier': 1.5,
     'rsi_period': 14,
     'enable_volume_filter': False,  # Disabled for portfolio scanning
