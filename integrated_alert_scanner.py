@@ -22,12 +22,29 @@ EMA_CONFIG = {
     'short_ema': 20,
     'long_ema': 50,
     'filter_ema': 200,
-    'lookback_days': 5,  # Check last 5 days for crossover
+    'lookback_days': 15,  # Check last 1 days for crossover
     'volume_multiplier': 1.5,
     'rsi_period': 14,
     'enable_volume_filter': False,  # Disabled for portfolio scanning
     'enable_rsi_filter': False,
     'enable_200ema_filter': False,
+}
+
+# New indicator configs
+VOLUME_CONFIG = {
+    'multiplier': 2.0,  # Volume must be 2x average
+    'avg_period': 20,   # 20-day average volume
+}
+
+RSI_CONFIG = {
+    'oversold': 30,     # RSI < 30 = Oversold (Bullish opportunity)
+    'overbought': 70,   # RSI > 70 = Overbought (Bearish warning)
+    'period': 14,
+}
+
+CONSOLIDATION_CONFIG = {
+    'period': 200,      # 200 days
+    'range_pct': 5,     # Within 5% range
 }
 
 # ================== PORTFOLIO FUNCTIONS ==================
@@ -341,6 +358,202 @@ def scan_promoter_buying(portfolio_stocks):
     
     return alerts
 
+# ================== NEW TECHNICAL INDICATORS ==================
+
+def scan_volume_breakout(stock):
+    """Detect volume breakout (Volume > 2x average)"""
+    ticker = stock['ticker']
+    symbol = stock['symbol']
+    name = stock['name']
+    portfolio = stock['portfolio']
+    
+    try:
+        # Get price data
+        yf_ticker = yf.Ticker(f"{ticker}.NS")
+        hist = yf_ticker.history(period='3mo')  # 3 months for volume analysis
+        
+        if hist.empty or len(hist) < VOLUME_CONFIG['avg_period']:
+            return None
+        
+        # Calculate volume average
+        hist['volume_avg'] = hist['Volume'].rolling(window=VOLUME_CONFIG['avg_period']).mean()
+        
+        # Get current values
+        current_volume = hist['Volume'].iloc[-1]
+        avg_volume = hist['volume_avg'].iloc[-1]
+        current_price = hist['Close'].iloc[-1]
+        prev_price = hist['Close'].iloc[-2]
+        
+        if pd.isna(avg_volume) or avg_volume == 0:
+            return None
+        
+        volume_ratio = current_volume / avg_volume
+        
+        # Check if volume breakout occurred
+        if volume_ratio < VOLUME_CONFIG['multiplier']:
+            return None
+        
+        # Determine if bullish or bearish based on price movement
+        price_change_pct = ((current_price - prev_price) / prev_price) * 100
+        
+        if abs(price_change_pct) < 0.5:  # Ignore if price didn't move much
+            return None
+        
+        is_bullish = price_change_pct > 0
+        
+        alert_type = 'volume_breakout_bullish' if is_bullish else 'volume_breakout_bearish'
+        alert_category = 'BULLISH' if is_bullish else 'BEARISH'
+        alert_title = f"{name} - Volume Breakout ({'Bullish' if is_bullish else 'Bearish'})"
+        alert_description = f"Volume {volume_ratio:.1f}x average with {abs(price_change_pct):.1f}% {'gain' if is_bullish else 'loss'}"
+        
+        details = {
+            'current_volume': int(current_volume),
+            'avg_volume': int(avg_volume),
+            'volume_ratio': round(volume_ratio, 2),
+            'price_change_pct': round(price_change_pct, 2),
+            'direction': 'up' if is_bullish else 'down'
+        }
+        
+        return {
+            'portfolio': portfolio,
+            'ticker': symbol,
+            'stock_name': name,
+            'alert_type': alert_type,
+            'alert_category': alert_category,
+            'alert_title': alert_title,
+            'alert_description': alert_description,
+            'price': round(current_price, 2),
+            'alert_date': datetime.now().date().isoformat(),
+            'details': details
+        }
+        
+    except Exception as e:
+        print(f"  ❌ Error scanning volume for {symbol}: {e}")
+        return None
+
+def scan_rsi_extremes(stock):
+    """Detect RSI oversold (<30) or overbought (>70) conditions"""
+    ticker = stock['ticker']
+    symbol = stock['symbol']
+    name = stock['name']
+    portfolio = stock['portfolio']
+    
+    try:
+        # Get price data
+        yf_ticker = yf.Ticker(f"{ticker}.NS")
+        hist = yf_ticker.history(period='3mo')
+        
+        if hist.empty or len(hist) < RSI_CONFIG['period'] + 5:
+            return None
+        
+        # Calculate RSI
+        hist['rsi'] = calculate_rsi(hist['Close'], RSI_CONFIG['period'])
+        
+        current_rsi = hist['rsi'].iloc[-1]
+        current_price = hist['Close'].iloc[-1]
+        
+        if pd.isna(current_rsi):
+            return None
+        
+        # Check for oversold (bullish opportunity)
+        if current_rsi < RSI_CONFIG['oversold']:
+            alert_type = 'rsi_oversold'
+            alert_category = 'BULLISH'
+            alert_title = f"{name} - RSI Oversold (Bullish Opportunity)"
+            alert_description = f"RSI at {current_rsi:.1f} - Potentially oversold"
+            
+        # Check for overbought (bearish warning)
+        elif current_rsi > RSI_CONFIG['overbought']:
+            alert_type = 'rsi_overbought'
+            alert_category = 'BEARISH'
+            alert_title = f"{name} - RSI Overbought (Bearish Warning)"
+            alert_description = f"RSI at {current_rsi:.1f} - Potentially overbought"
+            
+        else:
+            return None  # RSI in normal range
+        
+        details = {
+            'rsi': round(current_rsi, 2),
+            'rsi_oversold_level': RSI_CONFIG['oversold'],
+            'rsi_overbought_level': RSI_CONFIG['overbought'],
+        }
+        
+        return {
+            'portfolio': portfolio,
+            'ticker': symbol,
+            'stock_name': name,
+            'alert_type': alert_type,
+            'alert_category': alert_category,
+            'alert_title': alert_title,
+            'alert_description': alert_description,
+            'price': round(current_price, 2),
+            'alert_date': datetime.now().date().isoformat(),
+            'details': details
+        }
+        
+    except Exception as e:
+        print(f"  ❌ Error scanning RSI for {symbol}: {e}")
+        return None
+
+def scan_consolidation(stock):
+    """Detect 200-day price consolidation (within 5% range)"""
+    ticker = stock['ticker']
+    symbol = stock['symbol']
+    name = stock['name']
+    portfolio = stock['portfolio']
+    
+    try:
+        # Get price data
+        yf_ticker = yf.Ticker(f"{ticker}.NS")
+        hist = yf_ticker.history(period='1y')
+        
+        if hist.empty or len(hist) < CONSOLIDATION_CONFIG['period']:
+            return None
+        
+        # Get last 200 days
+        consolidation_period = hist['Close'].iloc[-CONSOLIDATION_CONFIG['period']:]
+        
+        highest = consolidation_period.max()
+        lowest = consolidation_period.min()
+        current_price = hist['Close'].iloc[-1]
+        
+        # Calculate range percentage
+        range_pct = ((highest - lowest) / lowest) * 100
+        
+        # Check if within consolidation range
+        if range_pct > CONSOLIDATION_CONFIG['range_pct']:
+            return None
+        
+        alert_type = 'consolidation_200day'
+        alert_category = 'INFO'
+        alert_title = f"{name} - 200-Day Consolidation"
+        alert_description = f"Price consolidating in {range_pct:.1f}% range for 200 days"
+        
+        details = {
+            'consolidation_days': CONSOLIDATION_CONFIG['period'],
+            'range_pct': round(range_pct, 2),
+            'highest': round(highest, 2),
+            'lowest': round(lowest, 2),
+            'current_price': round(current_price, 2)
+        }
+        
+        return {
+            'portfolio': portfolio,
+            'ticker': symbol,
+            'stock_name': name,
+            'alert_type': alert_type,
+            'alert_category': alert_category,
+            'alert_title': alert_title,
+            'alert_description': alert_description,
+            'price': round(current_price, 2),
+            'alert_date': datetime.now().date().isoformat(),
+            'details': details
+        }
+        
+    except Exception as e:
+        print(f"  ❌ Error scanning consolidation for {symbol}: {e}")
+        return None
+
 # ================== ALERT INSERTION ==================
 
 def insert_alert(alert_data):
@@ -404,6 +617,39 @@ def main():
     for alert in promoter_alerts:
         if insert_alert(alert):
             total_alerts += 1
+    
+    # Step 4: Scan for Volume Breakouts
+    print("\n\n📈 Scanning for Volume Breakouts...")
+    print(f"  Configuration: Volume > {VOLUME_CONFIG['multiplier']}x average ({VOLUME_CONFIG['avg_period']}-day)")
+    
+    for stock in portfolio_stocks:
+        print(f"  📊 {stock['name']} ({stock['symbol']})...")
+        alert = scan_volume_breakout(stock)
+        if alert:
+            if insert_alert(alert):
+                total_alerts += 1
+    
+    # Step 5: Scan for RSI Extremes
+    print("\n\n📉 Scanning for RSI Oversold/Overbought...")
+    print(f"  Configuration: Oversold < {RSI_CONFIG['oversold']}, Overbought > {RSI_CONFIG['overbought']}")
+    
+    for stock in portfolio_stocks:
+        print(f"  📊 {stock['name']} ({stock['symbol']})...")
+        alert = scan_rsi_extremes(stock)
+        if alert:
+            if insert_alert(alert):
+                total_alerts += 1
+    
+    # Step 6: Scan for 200-Day Consolidation
+    print("\n\n📊 Scanning for 200-Day Consolidation...")
+    print(f"  Configuration: {CONSOLIDATION_CONFIG['period']} days within {CONSOLIDATION_CONFIG['range_pct']}% range")
+    
+    for stock in portfolio_stocks:
+        print(f"  📊 {stock['name']} ({stock['symbol']})...")
+        alert = scan_consolidation(stock)
+        if alert:
+            if insert_alert(alert):
+                total_alerts += 1
     
     # Summary
     print("\n" + "=" * 70)
