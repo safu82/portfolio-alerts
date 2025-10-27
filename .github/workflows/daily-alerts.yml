@@ -1,0 +1,46 @@
+name: Daily Portfolio Alerts
+
+on:
+  schedule:
+    - cron: '30 10 * * *'  # 4:00 PM IST (10:30 AM UTC)
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  scan-alerts:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install supabase yfinance pandas numpy beautifulsoup4 requests
+      
+      - name: Delete old alerts (older than 5 days)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python -c "
+          import os
+          from datetime import datetime, timedelta
+          from supabase import create_client
+          
+          supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
+          cutoff_date = (datetime.now() - timedelta(days=5)).date().isoformat()
+          
+          result = supabase.table('alerts').delete().lt('alert_date', cutoff_date).execute()
+          print(f'🗑️ Deleted alerts older than {cutoff_date}')
+          "
+      
+      - name: Run alert scanner
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python integrated_alert_scanner.py
