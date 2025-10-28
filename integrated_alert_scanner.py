@@ -1010,12 +1010,12 @@ def insert_alert(alert_data):
     try:
         # Check if similar alert already exists in last 7 days
         existing = supabase.table('alerts').select('id').eq(
-            'ticker', alert_data['ticker']
-        ).eq(
-            'alert_type', alert_data['alert_type']
-        ).gte(
-            'alert_date', (datetime.now() - timedelta(days=7)).date().isoformat()
-        ).execute()
+    'ticker', alert_data['ticker']
+).eq(
+    'alert_type', alert_data['alert_type']
+).gte(
+    'alert_date', (datetime.now() - timedelta(days=7)).date().isoformat()
+).neq('status', 'ARCHIVED').execute()
         
         if len(existing.data) > 0:
             print(f"  ⚠️ Alert already exists for {alert_data['ticker']} - {alert_data['alert_type']}")
@@ -1029,6 +1029,28 @@ def insert_alert(alert_data):
         print(f"  ❌ Error inserting alert: {e}")
         return False
 
+def auto_archive_old_alerts(days=3):
+    """Auto-archive alerts older than specified days"""
+    try:
+        cutoff_date = (datetime.now() - timedelta(days=days)).date().isoformat()
+        
+        result = supabase.table('alerts').update(
+            {'status': 'ARCHIVED'}
+        ).eq('status', 'NEW').lt('alert_date', cutoff_date).execute()
+        
+        count = len(result.data) if result.data else 0
+        if count > 0:
+            print(f"  ✅ Auto-archived {count} alerts older than {days} days")
+        else:
+            print(f"  ℹ️ No alerts older than {days} days to archive")
+        
+        return count
+    except Exception as e:
+        print(f"  ❌ Error auto-archiving alerts: {e}")
+        return 0
+
+# ================== MAIN EXECUTION ==================
+
 # ================== MAIN EXECUTION ==================
 
 def main():
@@ -1041,6 +1063,10 @@ def main():
     print("\n📊 Fetching portfolio stocks...")
     portfolio_stocks = get_portfolio_stocks()
     print(f"  ✅ Found {len(portfolio_stocks)} stocks in portfolio")
+
+# Step 1.5: Auto-archive old alerts
+    print("\n📦 Auto-archiving old alerts...")
+    auto_archive_old_alerts(days=3)
     
     if not portfolio_stocks:
         print("  ❌ No stocks found. Exiting.")
