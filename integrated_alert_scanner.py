@@ -22,7 +22,7 @@ EMA_CONFIG = {
     'short_ema': 20,
     'long_ema': 50,
     'filter_ema': 200,
-    'lookback_days': 15,  # Check last 1 days for crossover
+    'lookback_days': 1,  # Check last 1 days for crossover
     'volume_multiplier': 1.5,
     'rsi_period': 14,
     'enable_volume_filter': False,  # Disabled for portfolio scanning
@@ -30,21 +30,35 @@ EMA_CONFIG = {
     'enable_200ema_filter': False,
 }
 
-# New indicator configs
+# Volume breakout config
 VOLUME_CONFIG = {
     'multiplier': 2.0,  # Volume must be 2x average
     'avg_period': 20,   # 20-day average volume
 }
 
+# RSI config
 RSI_CONFIG = {
     'oversold': 30,     # RSI < 30 = Oversold (Bullish opportunity)
     'overbought': 70,   # RSI > 70 = Overbought (Bearish warning)
     'period': 14,
 }
 
-CONSOLIDATION_CONFIG = {
-    'period': 200,      # 200 days
-    'range_pct': 5,     # Within 5% range
+# 200 EMA Breakout config
+BREAKOUT_200_CONFIG = {
+    'consolidation_days': 60,      # 60 days of consolidation below 200 EMA
+    'range_pct_min': 5,            # Minimum 5% range
+    'range_pct_max': 10,           # Maximum 10% range
+    'volume_multiplier': 2.0,      # Volume must be 2x average
+    'breakout_min_pct': 1,         # Must close 1% above 200 EMA
+}
+
+# 200 EMA Retest config
+RETEST_200_CONFIG = {
+    'lookback_days': 15,           # Look for breakout in last 15 days
+    'pullback_tolerance': 2,       # Within 2% of 200 EMA
+    'must_hold_ema': True,         # Cannot close below 200 EMA
+    'bounce_min_pct': 2,           # Must bounce at least 2%
+    'volume_multiplier': 1.5,      # Volume on bounce > 1.5x average
 }
 
 # ================== PORTFOLIO FUNCTIONS ==================
@@ -324,7 +338,8 @@ def scan_promoter_buying(portfolio_stocks):
         stock_name = next((s['name'] for s in portfolio_stocks if s['symbol'].upper() == txn['symbol'].upper()), txn['company_name'])
         
         alert_type = 'promoter_buying' if is_buying else 'promoter_selling'
-        alert_category = 'FUNDAMENTAL' if is_buying else 'INFO'
+        # UPDATED: Promoter Buying -> BULLISH, Promoter Selling -> BEARISH
+        alert_category = 'BULLISH' if is_buying else 'BEARISH'
         alert_title = f"{stock_name} - Promoter {'Buying' if is_buying else 'Selling'}"
         alert_description = f"{txn['person_entity'][:50]} - {txn['transaction_type']}"
         
@@ -358,7 +373,7 @@ def scan_promoter_buying(portfolio_stocks):
     
     return alerts
 
-# ================== NEW TECHNICAL INDICATORS ==================
+# ================== TECHNICAL INDICATORS ==================
 
 def scan_volume_breakout(stock):
     """Detect volume breakout (Volume > 2x average)"""
@@ -431,8 +446,23 @@ def scan_volume_breakout(stock):
         print(f"  ❌ Error scanning volume for {symbol}: {e}")
         return None
 
-def scan_rsi_extremes(stock):
-    """Detect RSI oversold (<30) or overbought (>70) conditions"""
+def find_peaks_and_troughs(series, window=5):
+    """Find peaks (local maxima) and troughs (local minima) in a series"""
+    peaks = []
+    troughs = []
+    
+    for i in range(window, len(series) - window):
+        # Check if it's a peak
+        if series.iloc[i] == max(series.iloc[i-window:i+window+1]):
+            peaks.append(i)
+        # Check if it's a trough
+        if series.iloc[i] == min(series.iloc[i-window:i+window+1]):
+            troughs.append(i)
+    
+    return peaks, troughs
+
+def scan_rsi_bullish_divergence(stock):
+    """Detect RSI bullish divergence - price lower lows, RSI higher lows"""
     ticker = stock['ticker']
     symbol = stock['symbol']
     name = stock['name']
@@ -443,60 +473,85 @@ def scan_rsi_extremes(stock):
         yf_ticker = yf.Ticker(f"{ticker}.NS")
         hist = yf_ticker.history(period='3mo')
         
-        if hist.empty or len(hist) < RSI_CONFIG['period'] + 5:
+        if hist.empty or len(hist) < 30:
             return None
         
         # Calculate RSI
         hist['rsi'] = calculate_rsi(hist['Close'], RSI_CONFIG['period'])
         
-        current_rsi = hist['rsi'].iloc[-1]
-        current_price = hist['Close'].iloc[-1]
+        # Look at last 30 days
+        window_data = hist.iloc[-30:]
         
-        if pd.isna(current_rsi):
+        if len(window_data) < 20:
             return None
         
-        # Check for oversold (bullish opportunity)
-        if current_rsi < RSI_CONFIG['oversold']:
-            alert_type = 'rsi_oversold'
+        # Find price troughs and RSI troughs
+        price_troughs_idx, _ = find_peaks_and_troughs(window_data['Close'])
+        rsi_troughs_idx, _ = find_peaks_and_troughs(window_data['rsi'])
+        
+        # Need at least 2 troughs to compare
+        if len(price_troughs_idx) < 2 or len(rsi_troughs_idx) < 2:
+            return None
+        
+        # Get the last 2 price troughs
+        last_price_trough_idx = price_troughs_idx[-1]
+        prev_price_trough_idx = price_troughs_idx[-2]
+        
+        last_price_trough = window_data['Close'].iloc[last_price_trough_idx]
+        prev_price_trough = window_data['Close'].iloc[prev_price_trough_idx]
+        
+        # Get the last 2 RSI troughs
+        last_rsi_trough_idx = rsi_troughs_idx[-1]
+        prev_rsi_trough_idx = rsi_troughs_idx[-2]
+        
+        last_rsi_trough = window_data['rsi'].iloc[last_rsi_trough_idx]
+        prev_rsi_trough = window_data['rsi'].iloc[prev_rsi_trough_idx]
+        
+        # Check for divergence: price making lower lows, RSI making higher lows
+        if last_price_trough < prev_price_trough and last_rsi_trough > prev_rsi_trough:
+            # Additional confirmation: last trough should be recent (within last 5 days)
+            if last_price_trough_idx < len(window_data) - 5:
+                return None
+            
+            current_price = hist['Close'].iloc[-1]
+            current_rsi = hist['rsi'].iloc[-1]
+            
+            alert_type = 'rsi_bullish_divergence'
             alert_category = 'BULLISH'
-            alert_title = f"{name} - RSI Oversold (Bullish Opportunity)"
-            alert_description = f"RSI at {current_rsi:.1f} - Potentially oversold"
+            alert_title = f"{name} - RSI Bullish Divergence"
+            alert_description = f"Price making lower lows but RSI making higher lows"
             
-        # Check for overbought (bearish warning)
-        elif current_rsi > RSI_CONFIG['overbought']:
-            alert_type = 'rsi_overbought'
-            alert_category = 'BEARISH'
-            alert_title = f"{name} - RSI Overbought (Bearish Warning)"
-            alert_description = f"RSI at {current_rsi:.1f} - Potentially overbought"
+            details = {
+                'current_rsi': round(current_rsi, 2),
+                'last_price_trough': round(last_price_trough, 2),
+                'prev_price_trough': round(prev_price_trough, 2),
+                'last_rsi_trough': round(last_rsi_trough, 2),
+                'prev_rsi_trough': round(prev_rsi_trough, 2),
+                'price_change_pct': round(((last_price_trough - prev_price_trough) / prev_price_trough) * 100, 2),
+                'rsi_change': round(last_rsi_trough - prev_rsi_trough, 2)
+            }
             
-        else:
-            return None  # RSI in normal range
+            return {
+                'portfolio': portfolio,
+                'ticker': symbol,
+                'stock_name': name,
+                'alert_type': alert_type,
+                'alert_category': alert_category,
+                'alert_title': alert_title,
+                'alert_description': alert_description,
+                'price': round(current_price, 2),
+                'alert_date': datetime.now().date().isoformat(),
+                'details': details
+            }
         
-        details = {
-            'rsi': round(current_rsi, 2),
-            'rsi_oversold_level': RSI_CONFIG['oversold'],
-            'rsi_overbought_level': RSI_CONFIG['overbought'],
-        }
-        
-        return {
-            'portfolio': portfolio,
-            'ticker': symbol,
-            'stock_name': name,
-            'alert_type': alert_type,
-            'alert_category': alert_category,
-            'alert_title': alert_title,
-            'alert_description': alert_description,
-            'price': round(current_price, 2),
-            'alert_date': datetime.now().date().isoformat(),
-            'details': details
-        }
+        return None
         
     except Exception as e:
-        print(f"  ❌ Error scanning RSI for {symbol}: {e}")
+        print(f"  ❌ Error scanning RSI bullish divergence for {symbol}: {e}")
         return None
 
-def scan_consolidation(stock):
-    """Detect 200-day price consolidation (within 5% range)"""
+def scan_rsi_oversold_recovery(stock):
+    """Detect RSI crossing above 30 after being oversold"""
     ticker = stock['ticker']
     symbol = stock['symbol']
     name = stock['name']
@@ -505,36 +560,310 @@ def scan_consolidation(stock):
     try:
         # Get price data
         yf_ticker = yf.Ticker(f"{ticker}.NS")
+        hist = yf_ticker.history(period='2mo')
+        
+        if hist.empty or len(hist) < 20:
+            return None
+        
+        # Calculate RSI
+        hist['rsi'] = calculate_rsi(hist['Close'], RSI_CONFIG['period'])
+        
+        current_rsi = hist['rsi'].iloc[-1]
+        
+        if pd.isna(current_rsi):
+            return None
+        
+        # Check last 5 days for oversold condition
+        recent_rsi = hist['rsi'].iloc[-6:-1]  # Last 5 days (excluding today)
+        
+        # Was oversold in last 5 days and now crossed above 30
+        was_oversold = any(recent_rsi < RSI_CONFIG['oversold'])
+        crossed_above = current_rsi >= RSI_CONFIG['oversold']
+        
+        # Find the lowest RSI in recent period
+        if was_oversold and crossed_above:
+            lowest_rsi = recent_rsi.min()
+            
+            # Additional filter: current RSI should be between 30-45 (not too high)
+            if current_rsi > 45:
+                return None
+            
+            current_price = hist['Close'].iloc[-1]
+            
+            alert_type = 'rsi_oversold_recovery'
+            alert_category = 'BULLISH'
+            alert_title = f"{name} - RSI Oversold Recovery"
+            alert_description = f"RSI crossed above 30 after reaching {lowest_rsi:.1f}"
+            
+            details = {
+                'current_rsi': round(current_rsi, 2),
+                'lowest_rsi': round(lowest_rsi, 2),
+                'rsi_oversold_level': RSI_CONFIG['oversold'],
+                'recovery_strength': 'Strong' if current_rsi > 35 else 'Moderate'
+            }
+            
+            return {
+                'portfolio': portfolio,
+                'ticker': symbol,
+                'stock_name': name,
+                'alert_type': alert_type,
+                'alert_category': alert_category,
+                'alert_title': alert_title,
+                'alert_description': alert_description,
+                'price': round(current_price, 2),
+                'alert_date': datetime.now().date().isoformat(),
+                'details': details
+            }
+        
+        return None
+        
+    except Exception as e:
+        print(f"  ❌ Error scanning RSI oversold recovery for {symbol}: {e}")
+        return None
+
+def scan_rsi_bearish_divergence(stock):
+    """Detect RSI bearish divergence - price higher highs, RSI lower highs"""
+    ticker = stock['ticker']
+    symbol = stock['symbol']
+    name = stock['name']
+    portfolio = stock['portfolio']
+    
+    try:
+        # Get price data
+        yf_ticker = yf.Ticker(f"{ticker}.NS")
+        hist = yf_ticker.history(period='3mo')
+        
+        if hist.empty or len(hist) < 30:
+            return None
+        
+        # Calculate RSI
+        hist['rsi'] = calculate_rsi(hist['Close'], RSI_CONFIG['period'])
+        
+        # Look at last 30 days
+        window_data = hist.iloc[-30:]
+        
+        if len(window_data) < 20:
+            return None
+        
+        # Find price peaks and RSI peaks
+        _, price_peaks_idx = find_peaks_and_troughs(window_data['Close'])
+        _, rsi_peaks_idx = find_peaks_and_troughs(window_data['rsi'])
+        
+        # Need at least 2 peaks to compare
+        if len(price_peaks_idx) < 2 or len(rsi_peaks_idx) < 2:
+            return None
+        
+        # Get the last 2 price peaks
+        last_price_peak_idx = price_peaks_idx[-1]
+        prev_price_peak_idx = price_peaks_idx[-2]
+        
+        last_price_peak = window_data['Close'].iloc[last_price_peak_idx]
+        prev_price_peak = window_data['Close'].iloc[prev_price_peak_idx]
+        
+        # Get the last 2 RSI peaks
+        last_rsi_peak_idx = rsi_peaks_idx[-1]
+        prev_rsi_peak_idx = rsi_peaks_idx[-2]
+        
+        last_rsi_peak = window_data['rsi'].iloc[last_rsi_peak_idx]
+        prev_rsi_peak = window_data['rsi'].iloc[prev_rsi_peak_idx]
+        
+        # Check for divergence: price making higher highs, RSI making lower highs
+        if last_price_peak > prev_price_peak and last_rsi_peak < prev_rsi_peak:
+            # Additional confirmation: last peak should be recent (within last 5 days)
+            if last_price_peak_idx < len(window_data) - 5:
+                return None
+            
+            current_price = hist['Close'].iloc[-1]
+            current_rsi = hist['rsi'].iloc[-1]
+            
+            alert_type = 'rsi_bearish_divergence'
+            alert_category = 'BEARISH'
+            alert_title = f"{name} - RSI Bearish Divergence"
+            alert_description = f"Price making higher highs but RSI making lower highs"
+            
+            details = {
+                'current_rsi': round(current_rsi, 2),
+                'last_price_peak': round(last_price_peak, 2),
+                'prev_price_peak': round(prev_price_peak, 2),
+                'last_rsi_peak': round(last_rsi_peak, 2),
+                'prev_rsi_peak': round(prev_rsi_peak, 2),
+                'price_change_pct': round(((last_price_peak - prev_price_peak) / prev_price_peak) * 100, 2),
+                'rsi_change': round(last_rsi_peak - prev_rsi_peak, 2)
+            }
+            
+            return {
+                'portfolio': portfolio,
+                'ticker': symbol,
+                'stock_name': name,
+                'alert_type': alert_type,
+                'alert_category': alert_category,
+                'alert_title': alert_title,
+                'alert_description': alert_description,
+                'price': round(current_price, 2),
+                'alert_date': datetime.now().date().isoformat(),
+                'details': details
+            }
+        
+        return None
+        
+    except Exception as e:
+        print(f"  ❌ Error scanning RSI bearish divergence for {symbol}: {e}")
+        return None
+
+def scan_rsi_overbought_breakdown(stock):
+    """Detect RSI crossing below 70 after being overbought"""
+    ticker = stock['ticker']
+    symbol = stock['symbol']
+    name = stock['name']
+    portfolio = stock['portfolio']
+    
+    try:
+        # Get price data
+        yf_ticker = yf.Ticker(f"{ticker}.NS")
+        hist = yf_ticker.history(period='2mo')
+        
+        if hist.empty or len(hist) < 20:
+            return None
+        
+        # Calculate RSI
+        hist['rsi'] = calculate_rsi(hist['Close'], RSI_CONFIG['period'])
+        
+        current_rsi = hist['rsi'].iloc[-1]
+        
+        if pd.isna(current_rsi):
+            return None
+        
+        # Check last 5 days for overbought condition
+        recent_rsi = hist['rsi'].iloc[-6:-1]  # Last 5 days (excluding today)
+        
+        # Was overbought in last 5 days and now crossed below 70
+        was_overbought = any(recent_rsi > RSI_CONFIG['overbought'])
+        crossed_below = current_rsi <= RSI_CONFIG['overbought']
+        
+        # Find the highest RSI in recent period
+        if was_overbought and crossed_below:
+            highest_rsi = recent_rsi.max()
+            
+            # Additional filter: current RSI should be between 55-70 (not too low)
+            if current_rsi < 55:
+                return None
+            
+            current_price = hist['Close'].iloc[-1]
+            
+            alert_type = 'rsi_overbought_breakdown'
+            alert_category = 'BEARISH'
+            alert_title = f"{name} - RSI Overbought Breakdown"
+            alert_description = f"RSI crossed below 70 after reaching {highest_rsi:.1f}"
+            
+            details = {
+                'current_rsi': round(current_rsi, 2),
+                'highest_rsi': round(highest_rsi, 2),
+                'rsi_overbought_level': RSI_CONFIG['overbought'],
+                'breakdown_strength': 'Strong' if current_rsi < 65 else 'Moderate'
+            }
+            
+            return {
+                'portfolio': portfolio,
+                'ticker': symbol,
+                'stock_name': name,
+                'alert_type': alert_type,
+                'alert_category': alert_category,
+                'alert_title': alert_title,
+                'alert_description': alert_description,
+                'price': round(current_price, 2),
+                'alert_date': datetime.now().date().isoformat(),
+                'details': details
+            }
+        
+        return None
+        
+    except Exception as e:
+        print(f"  ❌ Error scanning RSI overbought breakdown for {symbol}: {e}")
+        return None
+
+def scan_200ema_breakout(stock):
+    """Detect 200 EMA breakout after consolidation below it"""
+    ticker = stock['ticker']
+    symbol = stock['symbol']
+    name = stock['name']
+    portfolio = stock['portfolio']
+    
+    try:
+        # Get 1 year of price data
+        yf_ticker = yf.Ticker(f"{ticker}.NS")
         hist = yf_ticker.history(period='1y')
         
-        if hist.empty or len(hist) < CONSOLIDATION_CONFIG['period']:
+        if hist.empty or len(hist) < 200:
             return None
         
-        # Get last 200 days
-        consolidation_period = hist['Close'].iloc[-CONSOLIDATION_CONFIG['period']:]
+        # Calculate 200 EMA
+        hist['ema_200'] = calculate_ema(hist['Close'], 200)
+        hist['volume_avg'] = hist['Volume'].rolling(window=20).mean()
         
-        highest = consolidation_period.max()
-        lowest = consolidation_period.min()
-        current_price = hist['Close'].iloc[-1]
+        if pd.isna(hist['ema_200'].iloc[-1]):
+            return None
         
-        # Calculate range percentage
+        # Get consolidation period (last 60 days before today)
+        consolidation_start_idx = -BREAKOUT_200_CONFIG['consolidation_days'] - 1
+        consolidation_end_idx = -1
+        
+        consolidation_data = hist.iloc[consolidation_start_idx:consolidation_end_idx]
+        
+        if len(consolidation_data) < BREAKOUT_200_CONFIG['consolidation_days']:
+            return None
+        
+        # Check if price was consolidating BELOW 200 EMA
+        prices_below_ema = (consolidation_data['Close'] < consolidation_data['ema_200']).sum()
+        pct_below = (prices_below_ema / len(consolidation_data)) * 100
+        
+        if pct_below < 80:  # At least 80% of time below 200 EMA
+            return None
+        
+        # Check if consolidation range is between 5-10%
+        highest = consolidation_data['Close'].max()
+        lowest = consolidation_data['Close'].min()
         range_pct = ((highest - lowest) / lowest) * 100
         
-        # Check if within consolidation range
-        if range_pct > CONSOLIDATION_CONFIG['range_pct']:
+        if range_pct < BREAKOUT_200_CONFIG['range_pct_min'] or range_pct > BREAKOUT_200_CONFIG['range_pct_max']:
             return None
         
-        alert_type = 'consolidation_200day'
-        alert_category = 'INFO'
-        alert_title = f"{name} - 200-Day Consolidation"
-        alert_description = f"Price consolidating in {range_pct:.1f}% range for 200 days"
+        # Check if current price broke ABOVE 200 EMA
+        current_price = hist['Close'].iloc[-1]
+        current_ema_200 = hist['ema_200'].iloc[-1]
+        prev_price = hist['Close'].iloc[-2]
+        prev_ema_200 = hist['ema_200'].iloc[-2]
+        
+        # Breakout condition: previously below, now above
+        if not (prev_price <= prev_ema_200 and current_price > current_ema_200):
+            return None
+        
+        # Check breakout strength (at least 1% above 200 EMA)
+        breakout_pct = ((current_price - current_ema_200) / current_ema_200) * 100
+        if breakout_pct < BREAKOUT_200_CONFIG['breakout_min_pct']:
+            return None
+        
+        # Check volume spike
+        current_volume = hist['Volume'].iloc[-1]
+        avg_volume = hist['volume_avg'].iloc[-1]
+        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
+        
+        if volume_ratio < BREAKOUT_200_CONFIG['volume_multiplier']:
+            return None
+        
+        alert_type = 'ema_200_breakout'
+        alert_category = 'BULLISH'
+        alert_title = f"{name} - 200 EMA Breakout After Consolidation"
+        alert_description = f"Broke above 200 EMA after {BREAKOUT_200_CONFIG['consolidation_days']}-day consolidation"
         
         details = {
-            'consolidation_days': CONSOLIDATION_CONFIG['period'],
-            'range_pct': round(range_pct, 2),
-            'highest': round(highest, 2),
-            'lowest': round(lowest, 2),
-            'current_price': round(current_price, 2)
+            'current_price': round(current_price, 2),
+            'ema_200': round(current_ema_200, 2),
+            'breakout_pct': round(breakout_pct, 2),
+            'consolidation_days': BREAKOUT_200_CONFIG['consolidation_days'],
+            'consolidation_range_pct': round(range_pct, 2),
+            'volume_ratio': round(volume_ratio, 2),
+            'highest_in_consolidation': round(highest, 2),
+            'lowest_in_consolidation': round(lowest, 2)
         }
         
         return {
@@ -551,7 +880,127 @@ def scan_consolidation(stock):
         }
         
     except Exception as e:
-        print(f"  ❌ Error scanning consolidation for {symbol}: {e}")
+        print(f"  ❌ Error scanning 200 EMA breakout for {symbol}: {e}")
+        return None
+
+def scan_200ema_retest(stock):
+    """Detect bullish retest of 200 EMA as support after breakout"""
+    ticker = stock['ticker']
+    symbol = stock['symbol']
+    name = stock['name']
+    portfolio = stock['portfolio']
+    
+    try:
+        # Get price data
+        yf_ticker = yf.Ticker(f"{ticker}.NS")
+        hist = yf_ticker.history(period='3mo')
+        
+        if hist.empty or len(hist) < 200:
+            return None
+        
+        # Calculate 200 EMA
+        hist['ema_200'] = calculate_ema(hist['Close'], 200)
+        hist['volume_avg'] = hist['Volume'].rolling(window=20).mean()
+        
+        if pd.isna(hist['ema_200'].iloc[-1]):
+            return None
+        
+        current_price = hist['Close'].iloc[-1]
+        current_ema_200 = hist['ema_200'].iloc[-1]
+        current_volume = hist['Volume'].iloc[-1]
+        avg_volume = hist['volume_avg'].iloc[-1]
+        
+        # Step 1: Find if there was a breakout in the last 15 days
+        lookback_period = hist.iloc[-RETEST_200_CONFIG['lookback_days']:]
+        
+        breakout_found = False
+        breakout_idx = None
+        
+        for i in range(1, len(lookback_period)):
+            prev_price = lookback_period['Close'].iloc[i-1]
+            prev_ema = lookback_period['ema_200'].iloc[i-1]
+            curr_price = lookback_period['Close'].iloc[i]
+            curr_ema = lookback_period['ema_200'].iloc[i]
+            
+            # Check if crossed above 200 EMA
+            if prev_price <= prev_ema and curr_price > curr_ema:
+                breakout_found = True
+                breakout_idx = i
+                break
+        
+        if not breakout_found:
+            return None
+        
+        # Step 2: Check if there was a pullback to 200 EMA
+        # Look at data AFTER breakout
+        post_breakout_data = lookback_period.iloc[breakout_idx:]
+        
+        pullback_found = False
+        pullback_low = None
+        
+        for i in range(len(post_breakout_data)):
+            price = post_breakout_data['Close'].iloc[i]
+            ema = post_breakout_data['ema_200'].iloc[i]
+            
+            # Check if price came within tolerance of 200 EMA
+            distance_pct = abs(((price - ema) / ema) * 100)
+            
+            if distance_pct <= RETEST_200_CONFIG['pullback_tolerance']:
+                pullback_found = True
+                pullback_low = price
+                
+                # Check if price held ABOVE 200 EMA (didn't close below)
+                if RETEST_200_CONFIG['must_hold_ema'] and price < ema:
+                    pullback_found = False
+                    continue
+                
+                break
+        
+        if not pullback_found:
+            return None
+        
+        # Step 3: Check if price bounced from the pullback
+        # Current price should be at least 2% higher than pullback low
+        bounce_pct = ((current_price - pullback_low) / pullback_low) * 100
+        
+        if bounce_pct < RETEST_200_CONFIG['bounce_min_pct']:
+            return None
+        
+        # Step 4: Check volume on bounce
+        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
+        
+        if volume_ratio < RETEST_200_CONFIG['volume_multiplier']:
+            return None
+        
+        alert_type = 'ema_200_retest'
+        alert_category = 'BULLISH'
+        alert_title = f"{name} - Successful Retest of 200 EMA"
+        alert_description = f"Bounced {bounce_pct:.1f}% from 200 EMA support"
+        
+        details = {
+            'current_price': round(current_price, 2),
+            'ema_200': round(current_ema_200, 2),
+            'pullback_low': round(pullback_low, 2),
+            'bounce_pct': round(bounce_pct, 2),
+            'volume_ratio': round(volume_ratio, 2),
+            'days_since_breakout': len(post_breakout_data)
+        }
+        
+        return {
+            'portfolio': portfolio,
+            'ticker': symbol,
+            'stock_name': name,
+            'alert_type': alert_type,
+            'alert_category': alert_category,
+            'alert_title': alert_title,
+            'alert_description': alert_description,
+            'price': round(current_price, 2),
+            'alert_date': datetime.now().date().isoformat(),
+            'details': details
+        }
+        
+    except Exception as e:
+        print(f"  ❌ Error scanning 200 EMA retest for {symbol}: {e}")
         return None
 
 # ================== ALERT INSERTION ==================
@@ -610,7 +1059,7 @@ def main():
             if insert_alert(alert):
                 total_alerts += 1
     
-    # Step 3: Scan for promoter buying
+    # Step 3: Scan for promoter buying/selling
     print("\n\n💼 Scanning for Promoter Transactions...")
     promoter_alerts = scan_promoter_buying(portfolio_stocks)
     
@@ -629,24 +1078,68 @@ def main():
             if insert_alert(alert):
                 total_alerts += 1
     
-    # Step 5: Scan for RSI Extremes
-    print("\n\n📉 Scanning for RSI Oversold/Overbought...")
-    print(f"  Configuration: Oversold < {RSI_CONFIG['oversold']}, Overbought > {RSI_CONFIG['overbought']}")
+    # Step 5A: Scan for RSI Bullish Divergence
+    print("\n\n📈 Scanning for RSI Bullish Divergence...")
+    print(f"  Configuration: Price lower lows, RSI higher lows")
     
     for stock in portfolio_stocks:
         print(f"  📊 {stock['name']} ({stock['symbol']})...")
-        alert = scan_rsi_extremes(stock)
+        alert = scan_rsi_bullish_divergence(stock)
         if alert:
             if insert_alert(alert):
                 total_alerts += 1
     
-    # Step 6: Scan for 200-Day Consolidation
-    print("\n\n📊 Scanning for 200-Day Consolidation...")
-    print(f"  Configuration: {CONSOLIDATION_CONFIG['period']} days within {CONSOLIDATION_CONFIG['range_pct']}% range")
+    # Step 5B: Scan for RSI Oversold Recovery
+    print("\n\n✅ Scanning for RSI Oversold Recovery...")
+    print(f"  Configuration: RSI crossing above {RSI_CONFIG['oversold']} after oversold")
     
     for stock in portfolio_stocks:
         print(f"  📊 {stock['name']} ({stock['symbol']})...")
-        alert = scan_consolidation(stock)
+        alert = scan_rsi_oversold_recovery(stock)
+        if alert:
+            if insert_alert(alert):
+                total_alerts += 1
+    
+    # Step 5C: Scan for RSI Bearish Divergence
+    print("\n\n📉 Scanning for RSI Bearish Divergence...")
+    print(f"  Configuration: Price higher highs, RSI lower highs")
+    
+    for stock in portfolio_stocks:
+        print(f"  📊 {stock['name']} ({stock['symbol']})...")
+        alert = scan_rsi_bearish_divergence(stock)
+        if alert:
+            if insert_alert(alert):
+                total_alerts += 1
+    
+    # Step 5D: Scan for RSI Overbought Breakdown
+    print("\n\n⚠️ Scanning for RSI Overbought Breakdown...")
+    print(f"  Configuration: RSI crossing below {RSI_CONFIG['overbought']} after overbought")
+    
+    for stock in portfolio_stocks:
+        print(f"  📊 {stock['name']} ({stock['symbol']})...")
+        alert = scan_rsi_overbought_breakdown(stock)
+        if alert:
+            if insert_alert(alert):
+                total_alerts += 1
+    
+    # Step 6: Scan for 200 EMA Breakout
+    print("\n\n🚀 Scanning for 200 EMA Breakout After Consolidation...")
+    print(f"  Configuration: {BREAKOUT_200_CONFIG['consolidation_days']}-day consolidation, {BREAKOUT_200_CONFIG['range_pct_min']}-{BREAKOUT_200_CONFIG['range_pct_max']}% range")
+    
+    for stock in portfolio_stocks:
+        print(f"  📊 {stock['name']} ({stock['symbol']})...")
+        alert = scan_200ema_breakout(stock)
+        if alert:
+            if insert_alert(alert):
+                total_alerts += 1
+    
+    # Step 7: Scan for 200 EMA Retest
+    print("\n\n✅ Scanning for 200 EMA Retest Pattern...")
+    print(f"  Configuration: Lookback {RETEST_200_CONFIG['lookback_days']} days, bounce {RETEST_200_CONFIG['bounce_min_pct']}%+")
+    
+    for stock in portfolio_stocks:
+        print(f"  📊 {stock['name']} ({stock['symbol']})...")
+        alert = scan_200ema_retest(stock)
         if alert:
             if insert_alert(alert):
                 total_alerts += 1
