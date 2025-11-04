@@ -487,7 +487,8 @@ def scan_blue_zone_stocks(stock):
         yf_ticker = yf.Ticker(f"{ticker}.NS")
         hist = yf_ticker.history(period='1y')
         
-        if hist.empty or len(hist) < 252:  # Need at least 1 year of data
+        # Need at least 180 days of data (flexible for yfinance variations)
+        if hist.empty or len(hist) < 180:
             return None
         
         # Calculate RSI
@@ -499,8 +500,9 @@ def scan_blue_zone_stocks(stock):
         # Calculate ATR
         hist['atr'] = calculate_atr(hist['High'], hist['Low'], hist['Close'], BLUE_ZONE_CONFIG['atr_period'])
         
-        # Calculate 52-week high
-        hist['high_52w'] = hist['High'].rolling(window=252).max()
+        # Calculate 52-week high (use available data length, min 180 days)
+        lookback_days = min(len(hist), 252)
+        hist['high_52w'] = hist['High'].rolling(window=lookback_days).max()
         
         # Get current values
         current_price = hist['Close'].iloc[-1]
