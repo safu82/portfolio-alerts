@@ -61,6 +61,16 @@ RETEST_200_CONFIG = {
     'volume_multiplier': 1.5,      # Volume on bounce > 1.5x average
 }
 
+
+# Blue Zone Stocks config (Strong Momentum Pullback)
+BLUE_ZONE_CONFIG = {
+    'rsi_ema_period': 9,           # EMA period for RSI smoothing
+    'rsi_period': 14,              # RSI calculation period
+    'rsi_threshold': 60,           # EMA(9) of RSI must be > 60
+    'datr_multiplier': 1.5,        # Within 1.5 DATR of 52-week high
+    'atr_period': 14,              # ATR calculation period
+}
+
 # ================== PORTFOLIO FUNCTIONS ==================
 
 def get_portfolio_stocks():
@@ -109,6 +119,17 @@ def calculate_rsi(prices, period=14):
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
     return rsi
+
+
+def calculate_atr(high, low, close, period=14):
+    """Calculate Average True Range"""
+    tr1 = high - low
+    tr2 = abs(high - close.shift())
+    tr3 = abs(low - close.shift())
+    
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(window=period).mean()
+    return atr
 
 def detect_crossover(short_ema, long_ema, lookback_days):
     """Detect EMA crossover in the lookback period"""
@@ -446,340 +467,436 @@ def scan_volume_breakout(stock):
         print(f"  ❌ Error scanning volume for {symbol}: {e}")
         return None
 
-def find_peaks_and_troughs(series, window=5):
-    """Find peaks (local maxima) and troughs (local minima) in a series"""
-    peaks = []
-    troughs = []
-    
-    for i in range(window, len(series) - window):
-        # Check if it's a peak
-        if series.iloc[i] == max(series.iloc[i-window:i+window+1]):
-            peaks.append(i)
-        # Check if it's a trough
-        if series.iloc[i] == min(series.iloc[i-window:i+window+1]):
-            troughs.append(i)
-    
-    return peaks, troughs
 
-def scan_rsi_bullish_divergence(stock):
-    """Detect RSI bullish divergence - price lower lows, RSI higher lows"""
+# ================== BLUE ZONE STOCKS SCANNER ==================
+
+def scan_blue_zone_stocks(stock):
+    """
+    Identify strong momentum stocks (Blue Zone)
+    Conditions:
+    1. EMA(9) of RSI(14) > 60 (strong momentum)
+    2. Within 1.5 DATR of 52-week high (pullback in uptrend)
+    """
     ticker = stock['ticker']
     symbol = stock['symbol']
     name = stock['name']
     portfolio = stock['portfolio']
     
     try:
-        # Get price data
+        # Get 1 year of price data
         yf_ticker = yf.Ticker(f"{ticker}.NS")
-        hist = yf_ticker.history(period='3mo')
+        hist = yf_ticker.history(period='1y')
         
-        if hist.empty or len(hist) < 30:
+        if hist.empty or len(hist) < 252:  # Need at least 1 year of data
             return None
         
         # Calculate RSI
-        hist['rsi'] = calculate_rsi(hist['Close'], RSI_CONFIG['period'])
+        hist['rsi'] = calculate_rsi(hist['Close'], BLUE_ZONE_CONFIG['rsi_period'])
         
-        # Look at last 30 days
-        window_data = hist.iloc[-30:]
+        # Calculate EMA of RSI
+        hist['rsi_ema'] = calculate_ema(hist['rsi'], BLUE_ZONE_CONFIG['rsi_ema_period'])
         
-        if len(window_data) < 20:
+        # Calculate ATR
+        hist['atr'] = calculate_atr(hist['High'], hist['Low'], hist['Close'], BLUE_ZONE_CONFIG['atr_period'])
+        
+        # Calculate 52-week high
+        hist['high_52w'] = hist['High'].rolling(window=252).max()
+        
+        # Get current values
+        current_price = hist['Close'].iloc[-1]
+        current_rsi_ema = hist['rsi_ema'].iloc[-1]
+        current_atr = hist['atr'].iloc[-1]
+        high_52w = hist['high_52w'].iloc[-1]
+        
+        # Check for NaN values
+        if pd.isna([current_rsi_ema, current_atr, high_52w]).any():
             return None
         
-        # Find price troughs and RSI troughs
-        price_troughs_idx, _ = find_peaks_and_troughs(window_data['Close'])
-        rsi_troughs_idx, _ = find_peaks_and_troughs(window_data['rsi'])
+        # Calculate distance from 52-week high in DATR
+        distance_from_high = high_52w - current_price
+        datr_distance = distance_from_high / current_atr
         
-        # Need at least 2 troughs to compare
-        if len(price_troughs_idx) < 2 or len(rsi_troughs_idx) < 2:
+        # Check both conditions
+        condition_1 = current_rsi_ema > BLUE_ZONE_CONFIG['rsi_threshold']
+        condition_2 = datr_distance <= BLUE_ZONE_CONFIG['datr_multiplier']
+        
+        if not (condition_1 and condition_2):
             return None
         
-        # Get the last 2 price troughs
-        last_price_trough_idx = price_troughs_idx[-1]
-        prev_price_trough_idx = price_troughs_idx[-2]
+        # Calculate additional metrics for display
+        pct_from_high = ((high_52w - current_price) / high_52w) * 100
         
-        last_price_trough = window_data['Close'].iloc[last_price_trough_idx]
-        prev_price_trough = window_data['Close'].iloc[prev_price_trough_idx]
+        alert_type = 'blue_zone_stocks'
+        alert_category = 'BULLISH'
+        alert_title = f"{name} - Blue Zone Stock"
+        alert_description = f"Strong momentum (RSI EMA: {current_rsi_ema:.1f}) with {pct_from_high:.1f}% pullback from 52W high"
         
-        # Get the last 2 RSI troughs
-        last_rsi_trough_idx = rsi_troughs_idx[-1]
-        prev_rsi_trough_idx = rsi_troughs_idx[-2]
+        details = {
+            'rsi_ema_9': round(current_rsi_ema, 2),
+            'rsi_threshold': BLUE_ZONE_CONFIG['rsi_threshold'],
+            'current_price': round(current_price, 2),
+            'high_52w': round(high_52w, 2),
+            'pct_from_high': round(pct_from_high, 2),
+            'datr_distance': round(datr_distance, 2),
+            'datr_limit': BLUE_ZONE_CONFIG['datr_multiplier'],
+            'current_atr': round(current_atr, 2)
+        }
         
-        last_rsi_trough = window_data['rsi'].iloc[last_rsi_trough_idx]
-        prev_rsi_trough = window_data['rsi'].iloc[prev_rsi_trough_idx]
-        
-        # Check for divergence: price making lower lows, RSI making higher lows
-        if last_price_trough < prev_price_trough and last_rsi_trough > prev_rsi_trough:
-            # Additional confirmation: last trough should be recent (within last 5 days)
-            if last_price_trough_idx < len(window_data) - 5:
-                return None
-            
-            current_price = hist['Close'].iloc[-1]
-            current_rsi = hist['rsi'].iloc[-1]
-            
-            alert_type = 'rsi_bullish_divergence'
-            alert_category = 'BULLISH'
-            alert_title = f"{name} - RSI Bullish Divergence"
-            alert_description = f"Price making lower lows but RSI making higher lows"
-            
-            details = {
-                'current_rsi': round(current_rsi, 2),
-                'last_price_trough': round(last_price_trough, 2),
-                'prev_price_trough': round(prev_price_trough, 2),
-                'last_rsi_trough': round(last_rsi_trough, 2),
-                'prev_rsi_trough': round(prev_rsi_trough, 2),
-                'price_change_pct': round(((last_price_trough - prev_price_trough) / prev_price_trough) * 100, 2),
-                'rsi_change': round(last_rsi_trough - prev_rsi_trough, 2)
-            }
-            
-            return {
-                'portfolio': portfolio,
-                'ticker': symbol,
-                'stock_name': name,
-                'alert_type': alert_type,
-                'alert_category': alert_category,
-                'alert_title': alert_title,
-                'alert_description': alert_description,
-                'price': round(current_price, 2),
-                'alert_date': datetime.now().date().isoformat(),
-                'details': details
-            }
-        
-        return None
+        return {
+            'portfolio': portfolio,
+            'ticker': symbol,
+            'stock_name': name,
+            'alert_type': alert_type,
+            'alert_category': alert_category,
+            'alert_title': alert_title,
+            'alert_description': alert_description,
+            'price': round(current_price, 2),
+            'alert_date': datetime.now().date().isoformat(),
+            'details': details
+        }
         
     except Exception as e:
-        print(f"  ❌ Error scanning RSI bullish divergence for {symbol}: {e}")
+        print(f"  ❌ Error scanning Blue Zone for {symbol}: {e}")
         return None
 
-def scan_rsi_oversold_recovery(stock):
-    """Detect RSI crossing above 30 after being oversold"""
-    ticker = stock['ticker']
-    symbol = stock['symbol']
-    name = stock['name']
-    portfolio = stock['portfolio']
-    
-    try:
-        # Get price data
-        yf_ticker = yf.Ticker(f"{ticker}.NS")
-        hist = yf_ticker.history(period='2mo')
-        
-        if hist.empty or len(hist) < 20:
-            return None
-        
-        # Calculate RSI
-        hist['rsi'] = calculate_rsi(hist['Close'], RSI_CONFIG['period'])
-        
-        current_rsi = hist['rsi'].iloc[-1]
-        
-        if pd.isna(current_rsi):
-            return None
-        
-        # Check last 5 days for oversold condition
-        recent_rsi = hist['rsi'].iloc[-6:-1]  # Last 5 days (excluding today)
-        
-        # Was oversold in last 5 days and now crossed above 30
-        was_oversold = any(recent_rsi < RSI_CONFIG['oversold'])
-        crossed_above = current_rsi >= RSI_CONFIG['oversold']
-        
-        # Find the lowest RSI in recent period
-        if was_oversold and crossed_above:
-            lowest_rsi = recent_rsi.min()
-            
-            # Additional filter: current RSI should be between 30-45 (not too high)
-            if current_rsi > 45:
-                return None
-            
-            current_price = hist['Close'].iloc[-1]
-            
-            alert_type = 'rsi_oversold_recovery'
-            alert_category = 'BULLISH'
-            alert_title = f"{name} - RSI Oversold Recovery"
-            alert_description = f"RSI crossed above 30 after reaching {lowest_rsi:.1f}"
-            
-            details = {
-                'current_rsi': round(current_rsi, 2),
-                'lowest_rsi': round(lowest_rsi, 2),
-                'rsi_oversold_level': RSI_CONFIG['oversold'],
-                'recovery_strength': 'Strong' if current_rsi > 35 else 'Moderate'
-            }
-            
-            return {
-                'portfolio': portfolio,
-                'ticker': symbol,
-                'stock_name': name,
-                'alert_type': alert_type,
-                'alert_category': alert_category,
-                'alert_title': alert_title,
-                'alert_description': alert_description,
-                'price': round(current_price, 2),
-                'alert_date': datetime.now().date().isoformat(),
-                'details': details
-            }
-        
-        return None
-        
-    except Exception as e:
-        print(f"  ❌ Error scanning RSI oversold recovery for {symbol}: {e}")
-        return None
+# ================== RSI SCANNER (COMMENTED OUT - NOT IN USE) ==================
+# The following RSI functions have been commented out and replaced with Blue Zone Stocks
+# Uncomment if you want to re-enable RSI-based alerts
 
-def scan_rsi_bearish_divergence(stock):
-    """Detect RSI bearish divergence - price higher highs, RSI lower highs"""
-    ticker = stock['ticker']
-    symbol = stock['symbol']
-    name = stock['name']
-    portfolio = stock['portfolio']
+# def find_peaks_and_troughs(series, window=5):
+#     """Find peaks (local maxima) and troughs (local minima) in a series"""
+#     peaks = []
+#     troughs = []
     
-    try:
-        # Get price data
-        yf_ticker = yf.Ticker(f"{ticker}.NS")
-        hist = yf_ticker.history(period='3mo')
-        
-        if hist.empty or len(hist) < 30:
-            return None
-        
-        # Calculate RSI
-        hist['rsi'] = calculate_rsi(hist['Close'], RSI_CONFIG['period'])
-        
-        # Look at last 30 days
-        window_data = hist.iloc[-30:]
-        
-        if len(window_data) < 20:
-            return None
-        
-        # Find price peaks and RSI peaks
-        _, price_peaks_idx = find_peaks_and_troughs(window_data['Close'])
-        _, rsi_peaks_idx = find_peaks_and_troughs(window_data['rsi'])
-        
-        # Need at least 2 peaks to compare
-        if len(price_peaks_idx) < 2 or len(rsi_peaks_idx) < 2:
-            return None
-        
-        # Get the last 2 price peaks
-        last_price_peak_idx = price_peaks_idx[-1]
-        prev_price_peak_idx = price_peaks_idx[-2]
-        
-        last_price_peak = window_data['Close'].iloc[last_price_peak_idx]
-        prev_price_peak = window_data['Close'].iloc[prev_price_peak_idx]
-        
-        # Get the last 2 RSI peaks
-        last_rsi_peak_idx = rsi_peaks_idx[-1]
-        prev_rsi_peak_idx = rsi_peaks_idx[-2]
-        
-        last_rsi_peak = window_data['rsi'].iloc[last_rsi_peak_idx]
-        prev_rsi_peak = window_data['rsi'].iloc[prev_rsi_peak_idx]
-        
-        # Check for divergence: price making higher highs, RSI making lower highs
-        if last_price_peak > prev_price_peak and last_rsi_peak < prev_rsi_peak:
-            # Additional confirmation: last peak should be recent (within last 5 days)
-            if last_price_peak_idx < len(window_data) - 5:
-                return None
-            
-            current_price = hist['Close'].iloc[-1]
-            current_rsi = hist['rsi'].iloc[-1]
-            
-            alert_type = 'rsi_bearish_divergence'
-            alert_category = 'BEARISH'
-            alert_title = f"{name} - RSI Bearish Divergence"
-            alert_description = f"Price making higher highs but RSI making lower highs"
-            
-            details = {
-                'current_rsi': round(current_rsi, 2),
-                'last_price_peak': round(last_price_peak, 2),
-                'prev_price_peak': round(prev_price_peak, 2),
-                'last_rsi_peak': round(last_rsi_peak, 2),
-                'prev_rsi_peak': round(prev_rsi_peak, 2),
-                'price_change_pct': round(((last_price_peak - prev_price_peak) / prev_price_peak) * 100, 2),
-                'rsi_change': round(last_rsi_peak - prev_rsi_peak, 2)
-            }
-            
-            return {
-                'portfolio': portfolio,
-                'ticker': symbol,
-                'stock_name': name,
-                'alert_type': alert_type,
-                'alert_category': alert_category,
-                'alert_title': alert_title,
-                'alert_description': alert_description,
-                'price': round(current_price, 2),
-                'alert_date': datetime.now().date().isoformat(),
-                'details': details
-            }
-        
-        return None
-        
-    except Exception as e:
-        print(f"  ❌ Error scanning RSI bearish divergence for {symbol}: {e}")
-        return None
+#     for i in range(window, len(series) - window):
+#         # Check if it's a peak
+#         if series.iloc[i] == max(series.iloc[i-window:i+window+1]):
+#             peaks.append(i)
+#         # Check if it's a trough
+#         if series.iloc[i] == min(series.iloc[i-window:i+window+1]):
+#             troughs.append(i)
+    
+#     return peaks, troughs
 
-def scan_rsi_overbought_breakdown(stock):
-    """Detect RSI crossing below 70 after being overbought"""
-    ticker = stock['ticker']
-    symbol = stock['symbol']
-    name = stock['name']
-    portfolio = stock['portfolio']
+# def scan_rsi_bullish_divergence(stock):
+#     """Detect RSI bullish divergence - price lower lows, RSI higher lows"""
+#     ticker = stock['ticker']
+#     symbol = stock['symbol']
+#     name = stock['name']
+#     portfolio = stock['portfolio']
     
-    try:
-        # Get price data
-        yf_ticker = yf.Ticker(f"{ticker}.NS")
-        hist = yf_ticker.history(period='2mo')
+#     try:
+#         # Get price data
+#         yf_ticker = yf.Ticker(f"{ticker}.NS")
+#         hist = yf_ticker.history(period='3mo')
         
-        if hist.empty or len(hist) < 20:
-            return None
+#         if hist.empty or len(hist) < 30:
+#             return None
         
-        # Calculate RSI
-        hist['rsi'] = calculate_rsi(hist['Close'], RSI_CONFIG['period'])
+#         # Calculate RSI
+#         hist['rsi'] = calculate_rsi(hist['Close'], RSI_CONFIG['period'])
         
-        current_rsi = hist['rsi'].iloc[-1]
+#         # Look at last 30 days
+#         window_data = hist.iloc[-30:]
         
-        if pd.isna(current_rsi):
-            return None
+#         if len(window_data) < 20:
+#             return None
         
-        # Check last 5 days for overbought condition
-        recent_rsi = hist['rsi'].iloc[-6:-1]  # Last 5 days (excluding today)
+#         # Find price troughs and RSI troughs
+#         price_troughs_idx, _ = find_peaks_and_troughs(window_data['Close'])
+#         rsi_troughs_idx, _ = find_peaks_and_troughs(window_data['rsi'])
         
-        # Was overbought in last 5 days and now crossed below 70
-        was_overbought = any(recent_rsi > RSI_CONFIG['overbought'])
-        crossed_below = current_rsi <= RSI_CONFIG['overbought']
+#         # Need at least 2 troughs to compare
+#         if len(price_troughs_idx) < 2 or len(rsi_troughs_idx) < 2:
+#             return None
         
-        # Find the highest RSI in recent period
-        if was_overbought and crossed_below:
-            highest_rsi = recent_rsi.max()
+#         # Get the last 2 price troughs
+#         last_price_trough_idx = price_troughs_idx[-1]
+#         prev_price_trough_idx = price_troughs_idx[-2]
+        
+#         last_price_trough = window_data['Close'].iloc[last_price_trough_idx]
+#         prev_price_trough = window_data['Close'].iloc[prev_price_trough_idx]
+        
+#         # Get the last 2 RSI troughs
+#         last_rsi_trough_idx = rsi_troughs_idx[-1]
+#         prev_rsi_trough_idx = rsi_troughs_idx[-2]
+        
+#         last_rsi_trough = window_data['rsi'].iloc[last_rsi_trough_idx]
+#         prev_rsi_trough = window_data['rsi'].iloc[prev_rsi_trough_idx]
+        
+#         # Check for divergence: price making lower lows, RSI making higher lows
+#         if last_price_trough < prev_price_trough and last_rsi_trough > prev_rsi_trough:
+#             # Additional confirmation: last trough should be recent (within last 5 days)
+#             if last_price_trough_idx < len(window_data) - 5:
+#                 return None
             
-            # Additional filter: current RSI should be between 55-70 (not too low)
-            if current_rsi < 55:
-                return None
+#             current_price = hist['Close'].iloc[-1]
+#             current_rsi = hist['rsi'].iloc[-1]
             
-            current_price = hist['Close'].iloc[-1]
+#             alert_type = 'rsi_bullish_divergence'
+#             alert_category = 'BULLISH'
+#             alert_title = f"{name} - RSI Bullish Divergence"
+#             alert_description = f"Price making lower lows but RSI making higher lows"
             
-            alert_type = 'rsi_overbought_breakdown'
-            alert_category = 'BEARISH'
-            alert_title = f"{name} - RSI Overbought Breakdown"
-            alert_description = f"RSI crossed below 70 after reaching {highest_rsi:.1f}"
+#             details = {
+#                 'current_rsi': round(current_rsi, 2),
+#                 'last_price_trough': round(last_price_trough, 2),
+#                 'prev_price_trough': round(prev_price_trough, 2),
+#                 'last_rsi_trough': round(last_rsi_trough, 2),
+#                 'prev_rsi_trough': round(prev_rsi_trough, 2),
+#                 'price_change_pct': round(((last_price_trough - prev_price_trough) / prev_price_trough) * 100, 2),
+#                 'rsi_change': round(last_rsi_trough - prev_rsi_trough, 2)
+#             }
             
-            details = {
-                'current_rsi': round(current_rsi, 2),
-                'highest_rsi': round(highest_rsi, 2),
-                'rsi_overbought_level': RSI_CONFIG['overbought'],
-                'breakdown_strength': 'Strong' if current_rsi < 65 else 'Moderate'
-            }
-            
-            return {
-                'portfolio': portfolio,
-                'ticker': symbol,
-                'stock_name': name,
-                'alert_type': alert_type,
-                'alert_category': alert_category,
-                'alert_title': alert_title,
-                'alert_description': alert_description,
-                'price': round(current_price, 2),
-                'alert_date': datetime.now().date().isoformat(),
-                'details': details
-            }
+#             return {
+#                 'portfolio': portfolio,
+#                 'ticker': symbol,
+#                 'stock_name': name,
+#                 'alert_type': alert_type,
+#                 'alert_category': alert_category,
+#                 'alert_title': alert_title,
+#                 'alert_description': alert_description,
+#                 'price': round(current_price, 2),
+#                 'alert_date': datetime.now().date().isoformat(),
+#                 'details': details
+#             }
         
-        return None
+#         return None
         
-    except Exception as e:
-        print(f"  ❌ Error scanning RSI overbought breakdown for {symbol}: {e}")
-        return None
+#     except Exception as e:
+#         print(f"  ❌ Error scanning RSI bullish divergence for {symbol}: {e}")
+#         return None
+
+# def scan_rsi_oversold_recovery(stock):
+#     """Detect RSI crossing above 30 after being oversold"""
+#     ticker = stock['ticker']
+#     symbol = stock['symbol']
+#     name = stock['name']
+#     portfolio = stock['portfolio']
+    
+#     try:
+#         # Get price data
+#         yf_ticker = yf.Ticker(f"{ticker}.NS")
+#         hist = yf_ticker.history(period='2mo')
+        
+#         if hist.empty or len(hist) < 20:
+#             return None
+        
+#         # Calculate RSI
+#         hist['rsi'] = calculate_rsi(hist['Close'], RSI_CONFIG['period'])
+        
+#         current_rsi = hist['rsi'].iloc[-1]
+        
+#         if pd.isna(current_rsi):
+#             return None
+        
+#         # Check last 5 days for oversold condition
+#         recent_rsi = hist['rsi'].iloc[-6:-1]  # Last 5 days (excluding today)
+        
+#         # Was oversold in last 5 days and now crossed above 30
+#         was_oversold = any(recent_rsi < RSI_CONFIG['oversold'])
+#         crossed_above = current_rsi >= RSI_CONFIG['oversold']
+        
+#         # Find the lowest RSI in recent period
+#         if was_oversold and crossed_above:
+#             lowest_rsi = recent_rsi.min()
+            
+#             # Additional filter: current RSI should be between 30-45 (not too high)
+#             if current_rsi > 45:
+#                 return None
+            
+#             current_price = hist['Close'].iloc[-1]
+            
+#             alert_type = 'rsi_oversold_recovery'
+#             alert_category = 'BULLISH'
+#             alert_title = f"{name} - RSI Oversold Recovery"
+#             alert_description = f"RSI crossed above 30 after reaching {lowest_rsi:.1f}"
+            
+#             details = {
+#                 'current_rsi': round(current_rsi, 2),
+#                 'lowest_rsi': round(lowest_rsi, 2),
+#                 'rsi_oversold_level': RSI_CONFIG['oversold'],
+#                 'recovery_strength': 'Strong' if current_rsi > 35 else 'Moderate'
+#             }
+            
+#             return {
+#                 'portfolio': portfolio,
+#                 'ticker': symbol,
+#                 'stock_name': name,
+#                 'alert_type': alert_type,
+#                 'alert_category': alert_category,
+#                 'alert_title': alert_title,
+#                 'alert_description': alert_description,
+#                 'price': round(current_price, 2),
+#                 'alert_date': datetime.now().date().isoformat(),
+#                 'details': details
+#             }
+        
+#         return None
+        
+#     except Exception as e:
+#         print(f"  ❌ Error scanning RSI oversold recovery for {symbol}: {e}")
+#         return None
+
+# def scan_rsi_bearish_divergence(stock):
+#     """Detect RSI bearish divergence - price higher highs, RSI lower highs"""
+#     ticker = stock['ticker']
+#     symbol = stock['symbol']
+#     name = stock['name']
+#     portfolio = stock['portfolio']
+    
+#     try:
+#         # Get price data
+#         yf_ticker = yf.Ticker(f"{ticker}.NS")
+#         hist = yf_ticker.history(period='3mo')
+        
+#         if hist.empty or len(hist) < 30:
+#             return None
+        
+#         # Calculate RSI
+#         hist['rsi'] = calculate_rsi(hist['Close'], RSI_CONFIG['period'])
+        
+#         # Look at last 30 days
+#         window_data = hist.iloc[-30:]
+        
+#         if len(window_data) < 20:
+#             return None
+        
+#         # Find price peaks and RSI peaks
+#         _, price_peaks_idx = find_peaks_and_troughs(window_data['Close'])
+#         _, rsi_peaks_idx = find_peaks_and_troughs(window_data['rsi'])
+        
+#         # Need at least 2 peaks to compare
+#         if len(price_peaks_idx) < 2 or len(rsi_peaks_idx) < 2:
+#             return None
+        
+#         # Get the last 2 price peaks
+#         last_price_peak_idx = price_peaks_idx[-1]
+#         prev_price_peak_idx = price_peaks_idx[-2]
+        
+#         last_price_peak = window_data['Close'].iloc[last_price_peak_idx]
+#         prev_price_peak = window_data['Close'].iloc[prev_price_peak_idx]
+        
+#         # Get the last 2 RSI peaks
+#         last_rsi_peak_idx = rsi_peaks_idx[-1]
+#         prev_rsi_peak_idx = rsi_peaks_idx[-2]
+        
+#         last_rsi_peak = window_data['rsi'].iloc[last_rsi_peak_idx]
+#         prev_rsi_peak = window_data['rsi'].iloc[prev_rsi_peak_idx]
+        
+#         # Check for divergence: price making higher highs, RSI making lower highs
+#         if last_price_peak > prev_price_peak and last_rsi_peak < prev_rsi_peak:
+#             # Additional confirmation: last peak should be recent (within last 5 days)
+#             if last_price_peak_idx < len(window_data) - 5:
+#                 return None
+            
+#             current_price = hist['Close'].iloc[-1]
+#             current_rsi = hist['rsi'].iloc[-1]
+            
+#             alert_type = 'rsi_bearish_divergence'
+#             alert_category = 'BEARISH'
+#             alert_title = f"{name} - RSI Bearish Divergence"
+#             alert_description = f"Price making higher highs but RSI making lower highs"
+            
+#             details = {
+#                 'current_rsi': round(current_rsi, 2),
+#                 'last_price_peak': round(last_price_peak, 2),
+#                 'prev_price_peak': round(prev_price_peak, 2),
+#                 'last_rsi_peak': round(last_rsi_peak, 2),
+#                 'prev_rsi_peak': round(prev_rsi_peak, 2),
+#                 'price_change_pct': round(((last_price_peak - prev_price_peak) / prev_price_peak) * 100, 2),
+#                 'rsi_change': round(last_rsi_peak - prev_rsi_peak, 2)
+#             }
+            
+#             return {
+#                 'portfolio': portfolio,
+#                 'ticker': symbol,
+#                 'stock_name': name,
+#                 'alert_type': alert_type,
+#                 'alert_category': alert_category,
+#                 'alert_title': alert_title,
+#                 'alert_description': alert_description,
+#                 'price': round(current_price, 2),
+#                 'alert_date': datetime.now().date().isoformat(),
+#                 'details': details
+#             }
+        
+#         return None
+        
+#     except Exception as e:
+#         print(f"  ❌ Error scanning RSI bearish divergence for {symbol}: {e}")
+#         return None
+
+# def scan_rsi_overbought_breakdown(stock):
+#     """Detect RSI crossing below 70 after being overbought"""
+#     ticker = stock['ticker']
+#     symbol = stock['symbol']
+#     name = stock['name']
+#     portfolio = stock['portfolio']
+    
+#     try:
+#         # Get price data
+#         yf_ticker = yf.Ticker(f"{ticker}.NS")
+#         hist = yf_ticker.history(period='2mo')
+        
+#         if hist.empty or len(hist) < 20:
+#             return None
+        
+#         # Calculate RSI
+#         hist['rsi'] = calculate_rsi(hist['Close'], RSI_CONFIG['period'])
+        
+#         current_rsi = hist['rsi'].iloc[-1]
+        
+#         if pd.isna(current_rsi):
+#             return None
+        
+#         # Check last 5 days for overbought condition
+#         recent_rsi = hist['rsi'].iloc[-6:-1]  # Last 5 days (excluding today)
+        
+#         # Was overbought in last 5 days and now crossed below 70
+#         was_overbought = any(recent_rsi > RSI_CONFIG['overbought'])
+#         crossed_below = current_rsi <= RSI_CONFIG['overbought']
+        
+#         # Find the highest RSI in recent period
+#         if was_overbought and crossed_below:
+#             highest_rsi = recent_rsi.max()
+            
+#             # Additional filter: current RSI should be between 55-70 (not too low)
+#             if current_rsi < 55:
+#                 return None
+            
+#             current_price = hist['Close'].iloc[-1]
+            
+#             alert_type = 'rsi_overbought_breakdown'
+#             alert_category = 'BEARISH'
+#             alert_title = f"{name} - RSI Overbought Breakdown"
+#             alert_description = f"RSI crossed below 70 after reaching {highest_rsi:.1f}"
+            
+#             details = {
+#                 'current_rsi': round(current_rsi, 2),
+#                 'highest_rsi': round(highest_rsi, 2),
+#                 'rsi_overbought_level': RSI_CONFIG['overbought'],
+#                 'breakdown_strength': 'Strong' if current_rsi < 65 else 'Moderate'
+#             }
+            
+#             return {
+#                 'portfolio': portfolio,
+#                 'ticker': symbol,
+#                 'stock_name': name,
+#                 'alert_type': alert_type,
+#                 'alert_category': alert_category,
+#                 'alert_title': alert_title,
+#                 'alert_description': alert_description,
+#                 'price': round(current_price, 2),
+#                 'alert_date': datetime.now().date().isoformat(),
+#                 'details': details
+#             }
+        
+#         return None
+        
+#     except Exception as e:
+#         print(f"  ❌ Error scanning RSI overbought breakdown for {symbol}: {e}")
+#         return None
 
 def scan_200ema_breakout(stock):
     """Detect 200 EMA breakout after consolidation below it"""
@@ -1103,50 +1220,62 @@ def main():
         if alert:
             if insert_alert(alert):
                 total_alerts += 1
+
+    
+    # Step 5: Scan for Blue Zone Stocks (Strong Momentum Pullback)
+    print("\n\n🔵 Scanning for Blue Zone Stocks...")
+    print(f"  Configuration: RSI EMA(9) > {BLUE_ZONE_CONFIG['rsi_threshold']}, within {BLUE_ZONE_CONFIG['datr_multiplier']} DATR of 52W high")
+    
+    for stock in portfolio_stocks:
+        print(f"  📊 {stock['name']} ({stock['symbol']})...")
+        alert = scan_blue_zone_stocks(stock)
+        if alert:
+            if insert_alert(alert):
+                total_alerts += 1
     
     # Step 5A: Scan for RSI Bullish Divergence
-    print("\n\n📈 Scanning for RSI Bullish Divergence...")
-    print(f"  Configuration: Price lower lows, RSI higher lows")
+    # print("\n\n📈 Scanning for RSI Bullish Divergence...")
+    # print(f"  Configuration: Price lower lows, RSI higher lows")
     
-    for stock in portfolio_stocks:
-        print(f"  📊 {stock['name']} ({stock['symbol']})...")
-        alert = scan_rsi_bullish_divergence(stock)
-        if alert:
-            if insert_alert(alert):
-                total_alerts += 1
+    # for stock in portfolio_stocks:
+        # print(f"  📊 {stock['name']} ({stock['symbol']})...")
+        # alert = scan_rsi_bullish_divergence(stock)
+        # if alert:
+            # if insert_alert(alert):
+                # total_alerts += 1
     
     # Step 5B: Scan for RSI Oversold Recovery
-    print("\n\n✅ Scanning for RSI Oversold Recovery...")
-    print(f"  Configuration: RSI crossing above {RSI_CONFIG['oversold']} after oversold")
+    # print("\n\n✅ Scanning for RSI Oversold Recovery...")
+    # print(f"  Configuration: RSI crossing above {RSI_CONFIG['oversold']} after oversold")
     
-    for stock in portfolio_stocks:
-        print(f"  📊 {stock['name']} ({stock['symbol']})...")
-        alert = scan_rsi_oversold_recovery(stock)
-        if alert:
-            if insert_alert(alert):
-                total_alerts += 1
+    # for stock in portfolio_stocks:
+        # print(f"  📊 {stock['name']} ({stock['symbol']})...")
+        # alert = scan_rsi_oversold_recovery(stock)
+        # if alert:
+            # if insert_alert(alert):
+                # total_alerts += 1
     
     # Step 5C: Scan for RSI Bearish Divergence
-    print("\n\n📉 Scanning for RSI Bearish Divergence...")
-    print(f"  Configuration: Price higher highs, RSI lower highs")
+    # print("\n\n📉 Scanning for RSI Bearish Divergence...")
+    # print(f"  Configuration: Price higher highs, RSI lower highs")
     
-    for stock in portfolio_stocks:
-        print(f"  📊 {stock['name']} ({stock['symbol']})...")
-        alert = scan_rsi_bearish_divergence(stock)
-        if alert:
-            if insert_alert(alert):
-                total_alerts += 1
+    # for stock in portfolio_stocks:
+        # print(f"  📊 {stock['name']} ({stock['symbol']})...")
+        # alert = scan_rsi_bearish_divergence(stock)
+        # if alert:
+            # if insert_alert(alert):
+                # total_alerts += 1
     
     # Step 5D: Scan for RSI Overbought Breakdown
-    print("\n\n⚠️ Scanning for RSI Overbought Breakdown...")
-    print(f"  Configuration: RSI crossing below {RSI_CONFIG['overbought']} after overbought")
+    # print("\n\n⚠️ Scanning for RSI Overbought Breakdown...")
+    # print(f"  Configuration: RSI crossing below {RSI_CONFIG['overbought']} after overbought")
     
-    for stock in portfolio_stocks:
-        print(f"  📊 {stock['name']} ({stock['symbol']})...")
-        alert = scan_rsi_overbought_breakdown(stock)
-        if alert:
-            if insert_alert(alert):
-                total_alerts += 1
+    # for stock in portfolio_stocks:
+        # print(f"  📊 {stock['name']} ({stock['symbol']})...")
+        # alert = scan_rsi_overbought_breakdown(stock)
+        # if alert:
+            # if insert_alert(alert):
+                # total_alerts += 1
     
     # Step 6: Scan for 200 EMA Breakout
     print("\n\n🚀 Scanning for 200 EMA Breakout After Consolidation...")
