@@ -404,9 +404,9 @@ def scan_volume_breakout(stock):
     portfolio = stock['portfolio']
     
     try:
-        # Get price data
+        # Get price data - USE 1 YEAR for consistency with Blue Zone scanner
         yf_ticker = yf.Ticker(f"{ticker}.NS")
-        hist = yf_ticker.history(period='3mo')  # 3 months for volume analysis
+        hist = yf_ticker.history(period='1y')  # Changed from 3mo to 1y for consistency
         
         if hist.empty or len(hist) < VOLUME_CONFIG['avg_period']:
             return None
@@ -559,7 +559,7 @@ def scan_blue_zone_stocks(stock):
             'current_volume': int(current_volume),
             'avg_volume': int(avg_volume),
             'volume_ratio': round(volume_ratio, 2),
-            'volume_breakout': bool(has_volume_breakout),  # Explicit bool conversion
+            'volume_breakout': has_volume_breakout,
             'volume_threshold': VOLUME_CONFIG['multiplier']
         }
         
