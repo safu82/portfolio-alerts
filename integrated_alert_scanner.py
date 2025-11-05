@@ -514,6 +514,14 @@ def scan_blue_zone_stocks(stock):
         high_52w = hist['high_52w'].iloc[-1]
         current_volume = hist['Volume'].iloc[-1]
         avg_volume = hist['volume_avg'].iloc[-1]
+
+        # DEBUG: Print last few rows to see what dates we're getting
+        print(f"\n🔍 DEBUG for {symbol}:")
+        print(f"Last 3 rows of data:")
+        print(hist[['Close', 'Volume']].tail(3))
+        print(f"Last row date: {hist.index[-1]}")
+        print(f"Current price: {current_price}")
+        print(f"Current volume: {current_volume}")
         
         # Check for NaN values
         if pd.isna([current_rsi_ema, current_atr, high_52w]).any():
@@ -535,7 +543,9 @@ def scan_blue_zone_stocks(stock):
         
         # Check volume breakout
         volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
-        has_volume_breakout = volume_ratio >= VOLUME_CONFIG['multiplier']
+        has_volume_breakout = volume_ratio >= 2
+
+        print(f"Volume debug: ratio={volume_ratio}, type={type(volume_ratio)}, multiplier={VOLUME_CONFIG['multiplier']}, type={type(VOLUME_CONFIG['multiplier'])}, result={has_volume_breakout}")
         
         alert_type = 'blue_zone_stocks'
         alert_category = 'BULLISH'
@@ -1150,7 +1160,7 @@ def insert_alert(alert_data):
         import json
         if 'details' in alert_data and alert_data['details']:
             # Convert numpy bools and other non-JSON types
-            alert_data['details'] = json.loads(json.dumps(alert_data['details'], default=str))
+            alert_data['details'] = json.loads(json.dumps(alert_data['details'], default=lambda x: str(x) if not isinstance(x, bool) else x))
         
         # Check if similar alert already exists in last 7 days
         existing = supabase.table('alerts').select('id').eq(
