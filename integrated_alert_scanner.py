@@ -432,7 +432,7 @@ def scan_volume_breakout(stock):
         # Determine if bullish or bearish based on price movement
         price_change_pct = ((current_price - prev_price) / prev_price) * 100
         
-        if abs(price_change_pct) < 0.5:  # Ignore if price didn't move much
+        if abs(price_change_pct) < 3.0:  # Ignore if price didn't move much
             return None
         
         is_bullish = price_change_pct > 0
