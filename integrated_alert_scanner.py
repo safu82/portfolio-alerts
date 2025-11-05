@@ -504,11 +504,16 @@ def scan_blue_zone_stocks(stock):
         lookback_days = min(len(hist), 252)
         hist['high_52w'] = hist['High'].rolling(window=lookback_days).max()
         
+        # Calculate volume metrics
+        hist['volume_avg'] = hist['Volume'].rolling(window=VOLUME_CONFIG['avg_period']).mean()
+        
         # Get current values
         current_price = hist['Close'].iloc[-1]
         current_rsi_ema = hist['rsi_ema'].iloc[-1]
         current_atr = hist['atr'].iloc[-1]
         high_52w = hist['high_52w'].iloc[-1]
+        current_volume = hist['Volume'].iloc[-1]
+        avg_volume = hist['volume_avg'].iloc[-1]
         
         # Check for NaN values
         if pd.isna([current_rsi_ema, current_atr, high_52w]).any():
@@ -528,10 +533,19 @@ def scan_blue_zone_stocks(stock):
         # Calculate additional metrics for display
         pct_from_high = ((high_52w - current_price) / high_52w) * 100
         
+        # Check volume breakout
+        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
+        has_volume_breakout = volume_ratio >= VOLUME_CONFIG['multiplier']
+        
         alert_type = 'blue_zone_stocks'
         alert_category = 'BULLISH'
         alert_title = f"{name} - Blue Zone Stock"
-        alert_description = f"Strong momentum (RSI EMA: {current_rsi_ema:.1f}) with {pct_from_high:.1f}% pullback from 52W high"
+        
+        # Update description to include volume breakout status
+        if has_volume_breakout:
+            alert_description = f"Strong momentum (RSI EMA: {current_rsi_ema:.1f}) with {pct_from_high:.1f}% pullback from 52W high + Volume breakout ({volume_ratio:.1f}x) 🔥"
+        else:
+            alert_description = f"Strong momentum (RSI EMA: {current_rsi_ema:.1f}) with {pct_from_high:.1f}% pullback from 52W high"
         
         details = {
             'rsi_ema_9': round(current_rsi_ema, 2),
@@ -541,7 +555,12 @@ def scan_blue_zone_stocks(stock):
             'pct_from_high': round(pct_from_high, 2),
             'datr_distance': round(datr_distance, 2),
             'datr_limit': BLUE_ZONE_CONFIG['datr_multiplier'],
-            'current_atr': round(current_atr, 2)
+            'current_atr': round(current_atr, 2),
+            'current_volume': int(current_volume),
+            'avg_volume': int(avg_volume),
+            'volume_ratio': round(volume_ratio, 2),
+            'volume_breakout': has_volume_breakout,
+            'volume_threshold': VOLUME_CONFIG['multiplier']
         }
         
         return {
