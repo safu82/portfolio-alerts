@@ -559,7 +559,7 @@ def scan_blue_zone_stocks(stock):
             'current_volume': int(current_volume),
             'avg_volume': int(avg_volume),
             'volume_ratio': round(volume_ratio, 2),
-            'volume_breakout': has_volume_breakout,
+            'volume_breakout': bool(has_volume_breakout),  # Explicit bool conversion
             'volume_threshold': VOLUME_CONFIG['multiplier']
         }
         
@@ -1146,6 +1146,12 @@ def scan_200ema_retest(stock):
 def insert_alert(alert_data):
     """Insert alert into Supabase (avoid duplicates)"""
     try:
+        # Ensure details field is JSON serializable
+        import json
+        if 'details' in alert_data and alert_data['details']:
+            # Convert numpy bools and other non-JSON types
+            alert_data['details'] = json.loads(json.dumps(alert_data['details'], default=str))
+        
         # Check if similar alert already exists in last 7 days
         existing = supabase.table('alerts').select('id').eq(
     'ticker', alert_data['ticker']
