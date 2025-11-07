@@ -113,10 +113,30 @@ def scan_blue_zone(ticker, name):
         volume_ratio = float(current_volume / avg_volume) if avg_volume > 0 else 0.0
         has_volume_breakout = volume_ratio >= VOLUME_CONFIG['multiplier']
         
-        alert_description = f"Strong momentum (RSI EMA: {current_rsi_ema:.1f}) with {pct_from_high:.1f}% pullback from 52W high"
+        alert_description = f"Strong momentum (RSI EMA: {current_rsi_ema:.1f}) with {pct_from_high:.1f}% pullback from 52W high • {days_in_blue_zone} days in Blue Zone"
         if has_volume_breakout:
             alert_description += f" + Volume breakout ({volume_ratio:.1f}x) 🔥"
         
+        # Count consecutive days in Blue Zone
+days_in_blue_zone = 1  # Start with today
+for i in range(len(hist) - 2, -1, -1):  # Loop backwards from yesterday
+    past_rsi_ema = hist['rsi_ema'].iloc[i]
+    past_price = hist['Close'].iloc[i]
+    past_high_52w = hist['high_52w'].iloc[i]
+    past_atr = hist['atr'].iloc[i]
+    
+    if pd.isna([past_rsi_ema, past_atr, past_high_52w]).any():
+        break
+    
+    past_datr = (past_high_52w - past_price) / past_atr
+    
+    # Check if met Blue Zone conditions
+    if past_rsi_ema > BLUE_ZONE_CONFIG['rsi_threshold'] and past_datr <= BLUE_ZONE_CONFIG['datr_multiplier']:
+        days_in_blue_zone += 1
+    else:
+        break  # Stop counting when conditions not met
+
+
         return {
             'ticker': ticker,
             'stock_name': name,
@@ -140,6 +160,7 @@ def scan_blue_zone(ticker, name):
                 'volume_ratio': round(float(volume_ratio), 2),
                 'volume_breakout': bool(has_volume_breakout),
                 'volume_threshold': VOLUME_CONFIG['multiplier']
+                'days_in_blue_zone': days_in_blue_zone  # NEW!
             }
         }
     except Exception as e:
