@@ -214,9 +214,12 @@ def scan_ema_crossover(ticker, name):
         hist['ema_20'] = calculate_ema(hist['Close'], EMA_CONFIG['fast'])
         hist['ema_50'] = calculate_ema(hist['Close'], EMA_CONFIG['slow'])
         
+        # Calculate 20-day average volume for the entire history
+        hist['volume_avg'] = hist['Volume'].rolling(window=20).mean()
+        
         recent_data = hist.tail(EMA_CONFIG['lookback_days'])
         
-        # Check for golden cross (bullish)
+        # Check for golden cross (bullish) or death cross (bearish)
         for i in range(len(recent_data) - 1):
             prev_idx = recent_data.index[i]
             curr_idx = recent_data.index[i + 1]
@@ -226,80 +229,72 @@ def scan_ema_crossover(ticker, name):
             curr_20 = recent_data.loc[curr_idx, 'ema_20']
             curr_50 = recent_data.loc[curr_idx, 'ema_50']
             
-           # Golden cross
-if prev_20 <= prev_50 and curr_20 > curr_50:
-    current_price = recent_data.loc[curr_idx, 'Close']
-    prev_price = recent_data.loc[prev_idx, 'Close']
-    current_volume = recent_data.loc[curr_idx, 'Volume']
-    
-    # Calculate price change and volume
-    price_change_pct = ((current_price - prev_price) / prev_price) * 100
-    
-    # Get 20-day average volume
-    avg_volume = hist['Volume'].rolling(window=20).mean().loc[curr_idx]
-    volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
-    
-    # Check filters: 3% price move AND 2x volume
-    if abs(price_change_pct) >= 3.0 and volume_ratio >= 2.0:
-        return {
-            'ticker': ticker,
-            'stock_name': name,
-            'alert_type': 'ema_golden_cross',
-            'alert_category': 'BULLISH',
-            'alert_title': f"{name} - Golden Cross (20/50 EMA)",
-            'alert_description': f"20 EMA crossed above 50 EMA with {price_change_pct:.1f}% gain and {volume_ratio:.1f}x volume",
-            'price': round(float(current_price), 2),
-            'alert_date': curr_idx.date().isoformat(),
-            'details': {
-                '20_ema': round(float(curr_20), 2),
-                '50_ema': round(float(curr_50), 2),
-                'crossover_date': curr_idx.date().isoformat(),
-                'price_change_pct': round(float(price_change_pct), 2),
-                'volume_ratio': round(float(volume_ratio), 2),
-                'current_volume': int(current_volume),
-                'avg_volume': int(avg_volume)
-            }
-        }
+            current_price = recent_data.loc[curr_idx, 'Close']
+            prev_price = recent_data.loc[prev_idx, 'Close']
+            current_volume = recent_data.loc[curr_idx, 'Volume']
+            avg_volume = recent_data.loc[curr_idx, 'volume_avg']
             
-            # Death cross
-if prev_20 >= prev_50 and curr_20 < curr_50:
-    current_price = recent_data.loc[curr_idx, 'Close']
-    prev_price = recent_data.loc[prev_idx, 'Close']
-    current_volume = recent_data.loc[curr_idx, 'Volume']
-    
-    # Calculate price change and volume
-    price_change_pct = ((current_price - prev_price) / prev_price) * 100
-    
-    # Get 20-day average volume
-    avg_volume = hist['Volume'].rolling(window=20).mean().loc[curr_idx]
-    volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
-    
-    # Check filters: 3% price move AND 2x volume
-    if abs(price_change_pct) >= 3.0 and volume_ratio >= 2.0:
-        return {
-            'ticker': ticker,
-            'stock_name': name,
-            'alert_type': 'ema_death_cross',
-            'alert_category': 'BEARISH',
-            'alert_title': f"{name} - Death Cross (20/50 EMA)",
-            'alert_description': f"20 EMA crossed below 50 EMA with {abs(price_change_pct):.1f}% loss and {volume_ratio:.1f}x volume",
-            'price': round(float(current_price), 2),
-            'alert_date': curr_idx.date().isoformat(),
-            'details': {
-                '20_ema': round(float(curr_20), 2),
-                '50_ema': round(float(curr_50), 2),
-                'crossover_date': curr_idx.date().isoformat(),
-                'price_change_pct': round(float(price_change_pct), 2),
-                'volume_ratio': round(float(volume_ratio), 2),
-                'current_volume': int(current_volume),
-                'avg_volume': int(avg_volume)
-            }
-        }
+            # Skip if avg_volume is NaN or zero
+            if pd.isna(avg_volume) or avg_volume == 0:
+                continue
+            
+            # Calculate price change and volume ratio
+            price_change_pct = ((current_price - prev_price) / prev_price) * 100
+            volume_ratio = current_volume / avg_volume
+            
+            # Golden cross: 20 EMA crosses above 50 EMA
+            if prev_20 <= prev_50 and curr_20 > curr_50:
+                # Check filters: 3% price move AND 2x volume
+                if abs(price_change_pct) >= 3.0 and volume_ratio >= 2.0:
+                    return {
+                        'ticker': ticker,
+                        'stock_name': name,
+                        'alert_type': 'ema_golden_cross',
+                        'alert_category': 'BULLISH',
+                        'alert_title': f"{name} - Golden Cross (20/50 EMA)",
+                        'alert_description': f"20 EMA crossed above 50 EMA with {price_change_pct:.1f}% gain and {volume_ratio:.1f}x volume",
+                        'price': round(float(current_price), 2),
+                        'alert_date': curr_idx.date().isoformat(),
+                        'details': {
+                            '20_ema': round(float(curr_20), 2),
+                            '50_ema': round(float(curr_50), 2),
+                            'crossover_date': curr_idx.date().isoformat(),
+                            'price_change_pct': round(float(price_change_pct), 2),
+                            'volume_ratio': round(float(volume_ratio), 2),
+                            'current_volume': int(current_volume),
+                            'avg_volume': int(avg_volume)
+                        }
+                    }
+            
+            # Death cross: 20 EMA crosses below 50 EMA
+            if prev_20 >= prev_50 and curr_20 < curr_50:
+                # Check filters: 3% price move AND 2x volume
+                if abs(price_change_pct) >= 3.0 and volume_ratio >= 2.0:
+                    return {
+                        'ticker': ticker,
+                        'stock_name': name,
+                        'alert_type': 'ema_death_cross',
+                        'alert_category': 'BEARISH',
+                        'alert_title': f"{name} - Death Cross (20/50 EMA)",
+                        'alert_description': f"20 EMA crossed below 50 EMA with {abs(price_change_pct):.1f}% loss and {volume_ratio:.1f}x volume",
+                        'price': round(float(current_price), 2),
+                        'alert_date': curr_idx.date().isoformat(),
+                        'details': {
+                            '20_ema': round(float(curr_20), 2),
+                            '50_ema': round(float(curr_50), 2),
+                            'crossover_date': curr_idx.date().isoformat(),
+                            'price_change_pct': round(float(price_change_pct), 2),
+                            'volume_ratio': round(float(volume_ratio), 2),
+                            'current_volume': int(current_volume),
+                            'avg_volume': int(avg_volume)
+                        }
+                    }
         
         return None
     except Exception as e:
         print(f"  ❌ Error scanning {ticker}: {e}")
         return None
+
 
 # ================== MAIN EXECUTION ==================
 
