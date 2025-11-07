@@ -276,8 +276,8 @@ def scan_ema_crossover(ticker, name):
 def insert_alert(alert_data):
     """Insert alert into market_alerts table"""
     try:
-        # Check for duplicates (same ticker + type in last 3 days)
-        cutoff_date = (datetime.now() - timedelta(days=3)).date().isoformat()
+        # Check for duplicates (same ticker + type in last 1 day)
+        cutoff_date = (datetime.now() - timedelta(days=1)).date().isoformat()
         
         existing = supabase.table('market_alerts').select('id').eq(
             'ticker', alert_data['ticker']
@@ -298,9 +298,9 @@ def insert_alert(alert_data):
         return False
 
 def cleanup_old_alerts():
-    """Delete alerts older than 3 days"""
+    """Delete alerts older than 1 day"""
     try:
-        cutoff_date = (datetime.now() - timedelta(days=3)).date().isoformat()
+        cutoff_date = (datetime.now() - timedelta(days=1)).date().isoformat()
         
         result = supabase.table('market_alerts').delete().lt(
             'alert_date', cutoff_date
