@@ -324,13 +324,15 @@ def scan_ema_crossover(ticker, name):
 def insert_alert(alert_data):
     """Insert alert into market_alerts table"""
     try:
-        # Check for duplicates (same ticker + type in last 1 day)
+        # Check for duplicates (same ticker + type in last 1 day, not archived)
         cutoff_date = (datetime.now() - timedelta(days=1)).date().isoformat()
         
         existing = supabase.table('market_alerts').select('id').eq(
             'ticker', alert_data['ticker']
         ).eq(
             'alert_type', alert_data['alert_type']
+        ).eq(
+            'archived', False  # Only check non-archived alerts
         ).gte(
             'alert_date', cutoff_date
         ).execute()
@@ -338,25 +340,31 @@ def insert_alert(alert_data):
         if len(existing.data) > 0:
             return False
         
-        # Insert new alert
+        # Insert new alert (mark as not archived)
+        alert_data['archived'] = False
         response = supabase.table('market_alerts').insert(alert_data).execute()
         return True
     except Exception as e:
         print(f"  ❌ Error inserting alert: {e}")
         return False
 
-def cleanup_old_alerts():
-    """Delete alerts older than 1 day"""
+def archive_old_alerts():
+    """Archive alerts older than today (don't delete them)"""
     try:
-        cutoff_date = (datetime.now() - timedelta(days=1)).date().isoformat()
+        today = datetime.now().date().isoformat()
         
-        result = supabase.table('market_alerts').delete().lt(
-            'alert_date', cutoff_date
+        # Mark old alerts as archived instead of deleting
+        result = supabase.table('market_alerts').update({
+            'archived': True
+        }).lt(
+            'alert_date', today
+        ).eq(
+            'archived', False  # Only archive if not already archived
         ).execute()
         
-        print(f"  🗑️ Cleaned up alerts older than {cutoff_date}")
+        print(f"  📦 Archived alerts older than {today}")
     except Exception as e:
-        print(f"  ❌ Error cleaning up: {e}")
+        print(f"  ❌ Error archiving: {e}")
 
 def load_nifty500_stocks():
     """Load Nifty 500 stock list"""
@@ -385,9 +393,9 @@ def main():
     stocks = load_nifty500_stocks()
     print(f"  ✅ Loaded {len(stocks)} stocks")
     
-    # Cleanup old alerts
-    print("\n🗑️ Cleaning up old alerts...")
-    cleanup_old_alerts()
+    # Archive old alerts
+    print("\n📦 Archiving old alerts...")
+    archive_old_alerts()
     
     total_alerts = 0
     
