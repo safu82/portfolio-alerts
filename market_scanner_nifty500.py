@@ -43,6 +43,23 @@ BLUE_ZONE_CONFIG = {
     'datr_multiplier': 1.5,
 }
 
+# 200 EMA Breakout config (relaxed - Option B)
+BREAKOUT_200_CONFIG = {
+    'consolidation_days': 20,  # Days stock must stay below 200 EMA
+    'range_pct_min': 3,  # Minimum consolidation range
+    'range_pct_max': 15,  # Maximum consolidation range
+    'volume_multiplier': 1.5,  # Volume must be 1.5x average
+    'breakout_min_pct': 0.5,  # Minimum breakout percentage
+}
+
+# 200 EMA Retest config
+RETEST_200_CONFIG = {
+    'ema_period': 200,
+    'proximity_pct': 2,  # Within 2% of 200 EMA
+    'volume_multiplier': 1.5,  # Volume must be 1.5x average
+    'min_bounce_pct': 0.5,  # Minimum bounce percentage
+}
+
 # ================== HELPER FUNCTIONS ==================
 
 def calculate_rsi(prices, period=14):
@@ -319,6 +336,178 @@ def scan_ema_crossover(ticker, name):
         return None
 
 
+def scan_200ema_breakout(ticker, name):
+    """Scan for 200 EMA breakout after consolidation"""
+    try:
+        yf_ticker = yf.Ticker(f"{ticker}.NS")
+        hist = yf_ticker.history(period='1y')
+        
+        if hist.empty or len(hist) < 250:
+            return None
+        
+        # Calculate 200 EMA and volume average
+        hist['ema_200'] = calculate_ema(hist['Close'], 200)
+        hist['volume_avg'] = hist['Volume'].rolling(window=20).mean()
+        
+        # Get current values
+        current_price = hist['Close'].iloc[-1]
+        current_ema_200 = hist['ema_200'].iloc[-1]
+        current_volume = hist['Volume'].iloc[-1]
+        avg_volume = hist['volume_avg'].iloc[-1]
+        
+        if pd.isna([current_ema_200, avg_volume]).any():
+            return None
+        
+        # Check if price broke above 200 EMA today
+        prev_price = hist['Close'].iloc[-2]
+        prev_ema_200 = hist['ema_200'].iloc[-2]
+        
+        # Breakout condition: previous close below EMA, current close above EMA
+        if not (prev_price <= prev_ema_200 and current_price > current_ema_200):
+            return None
+        
+        # Calculate breakout percentage
+        breakout_pct = ((current_price - current_ema_200) / current_ema_200) * 100
+        
+        if breakout_pct < BREAKOUT_200_CONFIG['breakout_min_pct']:
+            return None
+        
+        # Count consolidation days (price stayed below 200 EMA)
+        consolidation_days = 0
+        for i in range(len(hist) - 2, -1, -1):
+            if hist['Close'].iloc[i] <= hist['ema_200'].iloc[i]:
+                consolidation_days += 1
+            else:
+                break
+        
+        # Must have consolidated for minimum days
+        if consolidation_days < BREAKOUT_200_CONFIG['consolidation_days']:
+            return None
+        
+        # Calculate consolidation range
+        consolidation_data = hist.iloc[-(consolidation_days+1):-1]
+        consolidation_high = consolidation_data['High'].max()
+        consolidation_low = consolidation_data['Low'].min()
+        range_pct = ((consolidation_high - consolidation_low) / consolidation_low) * 100
+        
+        # Range must be within acceptable bounds
+        if not (BREAKOUT_200_CONFIG['range_pct_min'] <= range_pct <= BREAKOUT_200_CONFIG['range_pct_max']):
+            return None
+        
+        # Volume confirmation
+        volume_ratio = float(current_volume / avg_volume) if avg_volume > 0 else 0.0
+        
+        if volume_ratio < BREAKOUT_200_CONFIG['volume_multiplier']:
+            return None
+        
+        alert_description = f"Broke above 200 EMA after {consolidation_days}-day consolidation ({range_pct:.1f}% range) with {volume_ratio:.1f}x volume"
+        
+        return {
+            'ticker': ticker,
+            'stock_name': name,
+            'alert_type': '200ema_breakout',
+            'alert_category': 'BULLISH',
+            'alert_title': f"{name} - 200 EMA Breakout",
+            'alert_description': alert_description,
+            'price': round(float(current_price), 2),
+            'alert_date': hist.index[-1].date().isoformat(),
+            'details': {
+                'current_price': round(float(current_price), 2),
+                'ema_200': round(float(current_ema_200), 2),
+                'breakout_pct': round(float(breakout_pct), 2),
+                'consolidation_days': consolidation_days,
+                'range_pct': round(float(range_pct), 2),
+                'volume_ratio': round(float(volume_ratio), 2),
+                'current_volume': int(current_volume),
+                'avg_volume': int(avg_volume)
+            }
+        }
+    except Exception as e:
+        print(f"  ❌ Error scanning {ticker}: {e}")
+        return None
+
+
+def scan_200ema_retest(ticker, name):
+    """Scan for 200 EMA retest (pullback to support)"""
+    try:
+        yf_ticker = yf.Ticker(f"{ticker}.NS")
+        hist = yf_ticker.history(period='1y')
+        
+        if hist.empty or len(hist) < 250:
+            return None
+        
+        # Calculate 200 EMA and volume average
+        hist['ema_200'] = calculate_ema(hist['Close'], 200)
+        hist['volume_avg'] = hist['Volume'].rolling(window=20).mean()
+        
+        # Get current values
+        current_price = hist['Close'].iloc[-1]
+        current_low = hist['Low'].iloc[-1]
+        current_ema_200 = hist['ema_200'].iloc[-1]
+        current_volume = hist['Volume'].iloc[-1]
+        avg_volume = hist['volume_avg'].iloc[-1]
+        
+        if pd.isna([current_ema_200, avg_volume]).any():
+            return None
+        
+        # Stock must be above 200 EMA (established uptrend)
+        if current_price <= current_ema_200:
+            return None
+        
+        # Check if stock came close to 200 EMA (retest)
+        proximity_pct = ((current_low - current_ema_200) / current_ema_200) * 100
+        
+        if proximity_pct > RETEST_200_CONFIG['proximity_pct']:
+            return None
+        
+        # Must have bounced from the retest
+        prev_close = hist['Close'].iloc[-2]
+        bounce_pct = ((current_price - prev_close) / prev_close) * 100
+        
+        if bounce_pct < RETEST_200_CONFIG['min_bounce_pct']:
+            return None
+        
+        # Volume confirmation
+        volume_ratio = float(current_volume / avg_volume) if avg_volume > 0 else 0.0
+        
+        if volume_ratio < RETEST_200_CONFIG['volume_multiplier']:
+            return None
+        
+        # Find when stock initially broke above 200 EMA
+        days_since_breakout = 0
+        for i in range(len(hist) - 2, -1, -1):
+            if hist['Close'].iloc[i] > hist['ema_200'].iloc[i]:
+                days_since_breakout += 1
+            else:
+                break
+        
+        alert_description = f"Retested 200 EMA as support ({proximity_pct:.1f}% from EMA) and bounced {bounce_pct:.1f}% with {volume_ratio:.1f}x volume"
+        
+        return {
+            'ticker': ticker,
+            'stock_name': name,
+            'alert_type': '200ema_retest',
+            'alert_category': 'BULLISH',
+            'alert_title': f"{name} - 200 EMA Retest",
+            'alert_description': alert_description,
+            'price': round(float(current_price), 2),
+            'alert_date': hist.index[-1].date().isoformat(),
+            'details': {
+                'current_price': round(float(current_price), 2),
+                'ema_200': round(float(current_ema_200), 2),
+                'proximity_pct': round(float(proximity_pct), 2),
+                'bounce_pct': round(float(bounce_pct), 2),
+                'days_since_breakout': days_since_breakout,
+                'volume_ratio': round(float(volume_ratio), 2),
+                'current_volume': int(current_volume),
+                'avg_volume': int(avg_volume)
+            }
+        }
+    except Exception as e:
+        print(f"  ❌ Error scanning {ticker}: {e}")
+        return None
+
+
 # ================== MAIN EXECUTION ==================
 
 def insert_alert(alert_data):
@@ -426,6 +615,16 @@ def main():
         ema_alert = scan_ema_crossover(ticker, name)
         if ema_alert:
             alerts.append(ema_alert)
+        
+        # 200 EMA Breakout
+        breakout_200_alert = scan_200ema_breakout(ticker, name)
+        if breakout_200_alert:
+            alerts.append(breakout_200_alert)
+        
+        # 200 EMA Retest
+        retest_200_alert = scan_200ema_retest(ticker, name)
+        if retest_200_alert:
+            alerts.append(retest_200_alert)
         
         # Insert alerts
         for alert in alerts:
