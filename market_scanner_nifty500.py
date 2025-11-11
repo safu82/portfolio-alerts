@@ -100,8 +100,15 @@ def scan_blue_zone(ticker, name):
         hist['rsi_ema'] = calculate_ema(hist['rsi'], BLUE_ZONE_CONFIG['rsi_ema_period'])
         hist['atr'] = calculate_atr(hist['High'], hist['Low'], hist['Close'], BLUE_ZONE_CONFIG['atr_period'])
         
+        # Calculate 52W high with adaptive min_periods to avoid NaN
+        # Use up to 252 days but require at least 70% of available data (minimum 120 days)
         lookback_days = min(len(hist), 252)
-        hist['high_52w'] = hist['High'].rolling(window=lookback_days).max()
+        min_periods_needed = min(int(lookback_days * 0.7), 120)
+        
+        if len(hist) < 120:  # Need at least ~6 months of data
+            return None
+            
+        hist['high_52w'] = hist['High'].rolling(window=lookback_days, min_periods=min_periods_needed).max()
         hist['volume_avg'] = hist['Volume'].rolling(window=VOLUME_CONFIG['avg_period']).mean()
         
         # Get current values
@@ -125,7 +132,7 @@ def scan_blue_zone(ticker, name):
         if not (condition_1 and condition_2):
             return None
         
-        # Count consecutive days in Blue Zone
+        # Count consecutive trading days in Blue Zone
         days_in_blue_zone = 1  # Start with today
         for i in range(len(hist) - 2, -1, -1):  # Loop backwards from yesterday
             try:
@@ -144,7 +151,9 @@ def scan_blue_zone(ticker, name):
                     days_in_blue_zone += 1
                 else:
                     break  # Stop counting when conditions not met
-            except:
+            except Exception as e:
+                # Debug: Uncomment to see errors
+                # print(f"  ⚠️ Error counting days for {ticker} at index {i}: {e}")
                 break  # Stop on any error
         
         # Calculate volume metrics
@@ -574,13 +583,15 @@ def load_nifty500_stocks():
 def main():
     # Check if today is a weekday (Monday=0, Sunday=6)
     if datetime.now().weekday() >= 5:  # Saturday=5, Sunday=6
-        print("📅 Weekend detected - scanner will not run")
-        print("⏸️  Market is closed. Exiting...")
+        print("=" * 70)
+        print("📅 WEEKEND DETECTED")
+        print(f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("⏸️  Market is closed. Scanner will not run on weekends.")
+        print("=" * 70)
         return
     
     print("=" * 70)
     print("📊 NIFTY 500 MARKET SCANNER")
-  
     print(f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 70)
     
