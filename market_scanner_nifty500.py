@@ -572,8 +572,15 @@ def load_nifty500_stocks():
     return stocks
 
 def main():
+    # Check if today is a weekday (Monday=0, Sunday=6)
+    if datetime.now().weekday() >= 5:  # Saturday=5, Sunday=6
+        print("📅 Weekend detected - scanner will not run")
+        print("⏸️  Market is closed. Exiting...")
+        return
+    
     print("=" * 70)
     print("📊 NIFTY 500 MARKET SCANNER")
+  
     print(f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 70)
     
