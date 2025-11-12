@@ -1294,7 +1294,7 @@ def insert_alert(alert_data):
         print(f"  ❌ Error inserting alert: {e}")
         return False
 
-def auto_archive_old_alerts(days=3):
+def auto_archive_old_alerts(days=1):
     """Auto-archive alerts older than specified days"""
     try:
         cutoff_date = (datetime.now() - timedelta(days=days)).date().isoformat()
@@ -1376,7 +1376,7 @@ def main():
 
 # Step 1.5: Auto-archive old alerts
     print("\n📦 Auto-archiving old alerts...")
-    auto_archive_old_alerts(days=3)
+    auto_archive_old_alerts(days=1)
     archive_past_results_alerts()  # Archive results alerts where date has passed
     
     if not portfolio_stocks:
