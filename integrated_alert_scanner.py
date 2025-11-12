@@ -1126,6 +1126,142 @@ def scan_200ema_retest(stock):
         print(f"  ❌ Error scanning 200 EMA retest for {symbol}: {e}")
         return None
 
+# ================== QUARTERLY RESULTS SCANNER ==================
+
+def scan_upcoming_results(stock):
+    """Scan for upcoming quarterly results in next 7 days using Trendlyne"""
+    ticker = stock['ticker']
+    symbol = stock['symbol']
+    name = stock['name']
+    portfolio = stock['portfolio']
+    
+    try:
+        # Trendlyne URL for results calendar
+        url = f"https://trendlyne.com/equity/{symbol}/results-calendar/"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            return None
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Look for upcoming results date
+        # Trendlyne typically shows this in a specific section
+        # We'll look for text patterns like "Expected on: DD Mon YYYY" or similar
+        
+        # Try multiple selectors as Trendlyne structure may vary
+        results_date = None
+        quarter = None
+        
+        # Strategy 1: Look for "Expected on" or "Results on" text
+        for text_elem in soup.find_all(string=True):
+            text = str(text_elem).strip().lower()
+            if 'expected' in text or 'results' in text:
+                # Try to extract date from nearby elements
+                parent = text_elem.parent
+                if parent:
+                    date_text = parent.get_text()
+                    # Try to parse date patterns
+                    import re
+                    # Pattern: DD Mon YYYY or DD-MM-YYYY
+                    date_patterns = [
+                        r'(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{4})',
+                        r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})'
+                    ]
+                    
+                    for pattern in date_patterns:
+                        match = re.search(pattern, date_text, re.IGNORECASE)
+                        if match:
+                            try:
+                                # Parse the date
+                                from dateutil import parser
+                                results_date = parser.parse(date_text, fuzzy=True).date()
+                                break
+                            except:
+                                continue
+                
+                if results_date:
+                    break
+        
+        # Strategy 2: Look in meta tags or structured data
+        if not results_date:
+            meta_tags = soup.find_all('meta')
+            for meta in meta_tags:
+                content = meta.get('content', '')
+                if 'result' in content.lower() or 'earning' in content.lower():
+                    # Try to parse date from content
+                    try:
+                        from dateutil import parser
+                        results_date = parser.parse(content, fuzzy=True).date()
+                        break
+                    except:
+                        continue
+        
+        if not results_date:
+            # No upcoming results found
+            return None
+        
+        # Calculate days until results
+        today = datetime.now().date()
+        days_until = (results_date - today).days
+        
+        # Only alert if within next 7 days and not past
+        if days_until < 0 or days_until > 7:
+            return None
+        
+        # Determine priority
+        if days_until <= 3:
+            priority = 'URGENT'
+            priority_emoji = '🔴'
+        else:
+            priority = 'UPCOMING'
+            priority_emoji = '🟡'
+        
+        # Determine quarter (rough approximation based on month)
+        current_month = datetime.now().month
+        if current_month <= 3:
+            quarter = 'Q4'
+        elif current_month <= 6:
+            quarter = 'Q1'
+        elif current_month <= 9:
+            quarter = 'Q2'
+        else:
+            quarter = 'Q3'
+        
+        current_year = datetime.now().year
+        fy_year = current_year if current_month <= 3 else current_year + 1
+        quarter_label = f"{quarter} FY{fy_year}"
+        
+        alert_description = f"Results expected on {results_date.strftime('%b %d, %Y')} (in {days_until} {'day' if days_until == 1 else 'days'}) {priority_emoji}"
+        
+        return {
+            'portfolio': portfolio,
+            'ticker': symbol,
+            'stock_name': name,
+            'alert_type': 'quarterly_results',
+            'alert_category': 'INFO',
+            'alert_title': f"{name} - Quarterly Results Upcoming",
+            'alert_description': alert_description,
+            'price': None,  # Not relevant for results alerts
+            'alert_date': today.isoformat(),
+            'details': {
+                'results_date': results_date.isoformat(),
+                'days_until': days_until,
+                'quarter': quarter_label,
+                'priority': priority,
+                'trendlyne_url': url
+            }
+        }
+        
+    except Exception as e:
+        print(f"  ❌ Error scanning results for {symbol}: {e}")
+        return None
+
 # ================== ALERT INSERTION ==================
 
 def insert_alert(alert_data):
@@ -1178,6 +1314,42 @@ def auto_archive_old_alerts(days=3):
         print(f"  ❌ Error auto-archiving alerts: {e}")
         return 0
 
+def archive_past_results_alerts():
+    """Archive quarterly results alerts where results date has passed"""
+    try:
+        today = datetime.now().date().isoformat()
+        
+        # Get all active quarterly_results alerts
+        alerts_response = supabase.table('alerts').select('id, details').eq(
+            'alert_type', 'quarterly_results'
+        ).eq(
+            'status', 'NEW'
+        ).execute()
+        
+        archived_count = 0
+        for alert in alerts_response.data:
+            if alert.get('details') and alert['details'].get('results_date'):
+                results_date = alert['details']['results_date']
+                # If results date has passed, archive it
+                if results_date < today:
+                    supabase.table('alerts').update(
+                        {'status': 'ARCHIVED'}
+                    ).eq('id', alert['id']).execute()
+                    archived_count += 1
+        
+        if archived_count > 0:
+            print(f"  ✅ Archived {archived_count} past results alerts")
+        
+        return archived_count
+    except Exception as e:
+        print(f"  ❌ Error archiving results alerts: {e}")
+        return 0
+        
+        return count
+    except Exception as e:
+        print(f"  ❌ Error auto-archiving alerts: {e}")
+        return 0
+
 # ================== MAIN EXECUTION ==================
 
 # ================== MAIN EXECUTION ==================
@@ -1205,6 +1377,7 @@ def main():
 # Step 1.5: Auto-archive old alerts
     print("\n📦 Auto-archiving old alerts...")
     auto_archive_old_alerts(days=3)
+    archive_past_results_alerts()  # Archive results alerts where date has passed
     
     if not portfolio_stocks:
         print("  ❌ No stocks found. Exiting.")
@@ -1311,11 +1484,22 @@ def main():
     
     # Step 7: Scan for 200 EMA Retest
     print("\n\n✅ Scanning for 200 EMA Retest Pattern...")
-    print(f"  Configuration: Lookback {RETEST_200_CONFIG['lookback_days']} days, bounce {RETEST_200_CONFIG['bounce_min_pct']}%+")
+    print(f"  Configuration: Proximity {RETEST_200_CONFIG['proximity_pct']}%, bounce {RETEST_200_CONFIG['min_bounce_pct']}%+")
     
     for stock in portfolio_stocks:
         print(f"  📊 {stock['name']} ({stock['symbol']})...")
         alert = scan_200ema_retest(stock)
+        if alert:
+            if insert_alert(alert):
+                total_alerts += 1
+    
+    # Step 8: Scan for Upcoming Quarterly Results
+    print("\n\n📅 Scanning for Upcoming Quarterly Results (Next 7 Days)...")
+    print(f"  Checking earnings calendar for all portfolio stocks...")
+    
+    for stock in portfolio_stocks:
+        print(f"  📊 {stock['name']} ({stock['symbol']})...")
+        alert = scan_upcoming_results(stock)
         if alert:
             if insert_alert(alert):
                 total_alerts += 1
