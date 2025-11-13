@@ -1273,17 +1273,38 @@ def insert_alert(alert_data):
             # Convert numpy bools and other non-JSON types
             alert_data['details'] = json.loads(json.dumps(alert_data['details'], default=lambda x: str(x) if not isinstance(x, bool) else x))
         
-        # Check if similar alert already exists in last 7 days
-        existing = supabase.table('alerts').select('id').eq(
-    'ticker', alert_data['ticker']
-).eq(
-    'alert_type', alert_data['alert_type']
-).gte(
-    'alert_date', (datetime.now() - timedelta(days=7)).date().isoformat()
-).neq('status', 'ARCHIVED').execute()
+        today = datetime.now().date().isoformat()
         
-        if len(existing.data) > 0:
-            print(f"  ⚠️ Alert already exists for {alert_data['ticker']} - {alert_data['alert_type']}")
+        # FIRST: Archive any old alerts (from previous days) for same ticker+type
+        old_alerts = supabase.table('alerts').select('id').eq(
+            'ticker', alert_data['ticker']
+        ).eq(
+            'alert_type', alert_data['alert_type']
+        ).lt(
+            'alert_date', today  # Before today
+        ).eq(
+            'status', 'NEW'
+        ).execute()
+        
+        if len(old_alerts.data) > 0:
+            # Archive them
+            for old_alert in old_alerts.data:
+                supabase.table('alerts').update({'status': 'ARCHIVED'}).eq('id', old_alert['id']).execute()
+            print(f"  📦 Archived {len(old_alerts.data)} old alert(s) for {alert_data['ticker']}")
+        
+        # THEN: Check if alert for TODAY already exists
+        existing_today = supabase.table('alerts').select('id').eq(
+            'ticker', alert_data['ticker']
+        ).eq(
+            'alert_type', alert_data['alert_type']
+        ).eq(
+            'alert_date', today  # Same day
+        ).eq(
+            'status', 'NEW'
+        ).execute()
+        
+        if len(existing_today.data) > 0:
+            print(f"  ⚠️ Alert for TODAY already exists for {alert_data['ticker']} - {alert_data['alert_type']}")
             return False
         
         # Insert new alert
