@@ -381,20 +381,24 @@ def scan_200ema_breakout(ticker, name):
         if breakout_pct < BREAKOUT_200_CONFIG['breakout_min_pct']:
             return None
         
-        # Count consolidation days (price stayed below 200 EMA)
-        consolidation_days = 0
-        for i in range(len(hist) - 2, -1, -1):
-            if hist['Close'].iloc[i] <= hist['ema_200'].iloc[i]:
-                consolidation_days += 1
-            else:
-                break
+        # Use FIXED 20-day consolidation window (matching test case)
+        consolidation_days = BREAKOUT_200_CONFIG['consolidation_days']
+        consolidation_start_idx = -(consolidation_days + 1)
+        consolidation_end_idx = -1
+        consolidation_data = hist.iloc[consolidation_start_idx:consolidation_end_idx]
         
-        # Must have consolidated for minimum days
-        if consolidation_days < BREAKOUT_200_CONFIG['consolidation_days']:
+        if len(consolidation_data) < consolidation_days:
+            return None
+        
+        # Count days below 200 EMA (must be 70%+ like test case)
+        prices_below = (consolidation_data['Close'] <= consolidation_data['ema_200']).sum()
+        pct_below = (prices_below / len(consolidation_data)) * 100
+        
+        # Must have been below EMA for 70%+ of consolidation period
+        if pct_below < 70:
             return None
         
         # Calculate consolidation range
-        consolidation_data = hist.iloc[-(consolidation_days+1):-1]
         consolidation_high = consolidation_data['High'].max()
         consolidation_low = consolidation_data['Low'].min()
         range_pct = ((consolidation_high - consolidation_low) / consolidation_low) * 100
@@ -409,7 +413,7 @@ def scan_200ema_breakout(ticker, name):
         if volume_ratio < BREAKOUT_200_CONFIG['volume_multiplier']:
             return None
         
-        alert_description = f"Broke above 200 EMA after {consolidation_days}-day consolidation ({range_pct:.1f}% range) with {volume_ratio:.1f}x volume"
+        alert_description = f"Broke above 200 EMA after {consolidation_days}-day consolidation ({pct_below:.0f}% time below, {range_pct:.1f}% range) with {volume_ratio:.1f}x volume"
         
         return {
             'ticker': ticker,
@@ -425,6 +429,7 @@ def scan_200ema_breakout(ticker, name):
                 'ema_200': round(float(current_ema_200), 2),
                 'breakout_pct': round(float(breakout_pct), 2),
                 'consolidation_days': consolidation_days,
+                'pct_below_ema': round(float(pct_below), 1),
                 'range_pct': round(float(range_pct), 2),
                 'volume_ratio': round(float(volume_ratio), 2),
                 'current_volume': int(current_volume),
