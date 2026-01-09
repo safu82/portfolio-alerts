@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+"""
+PRODUCTION: OHLC Data Fetcher for Nifty 500
+Fetches 260 days of OHLC data and stores in Supabase
+
+Schedule: Daily at 4:30 PM IST (after market close)
+Runtime: ~5-7 minutes for 500 stocks
+"""
+
+import yfinance as yf
+from datetime import datetime, timedelta
+from supabase import create_client, Client
+import time
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+SUPABASE_URL = 'https://hcgyncghmcvylnrmcivj.supabase.co'
+SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjZ3luY2dobWN2eWxucm1jaXZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc1MTQwMTEsImV4cCI6MjA3MzA5MDAxMX0.n8vFVCJe1y_3o8fpAY0IgasZ4eKl7DAogEM3OlHB8Ww'
+
+DAYS_HISTORY = 260  # ~1 year for 200 EMA calculations
+RATE_LIMIT_DELAY = 0.3  # seconds between requests
+
+# Nifty 500 tickers (501 stocks)
+NIFTY_500_TICKERS = [
+    'DELHIVERY.NS', 'CASTROLIND.NS', 'SARDAEN.NS', 'GODIGIT.NS', 'PNCINFRA.NS',
+    'AEGISLOG.NS', 'WELCORP.NS', 'IDEA.NS', '360ONE.NS', 'SAPPHIRE.NS', 'ASTRAL.NS',
+    'REDINGTON.NS', 'WESTLIFE.NS', 'HOMEFIRST.NS', 'CRAFTSMAN.NS', 'APARINDS.NS',
+    'EMAMILTD.NS', 'TRITURBINE.NS', 'VTL.NS', 'STARHEALTH.NS', 'INDIACEM.NS',
+    'ROUTE.NS', 'GESHIP.NS', 'USHAMART.NS', 'APLLTD.NS', 'NAVINFLUOR.NS',
+    'HINDALCO.NS', 'TRENT.NS', 'MAHLIFE.NS', 'HAPPSTMNDS.NS', 'KIRLOSBROS.NS',
+    'GVT&D.NS', 'VEDL.NS', 'ABSLAMC.NS', 'BALAMINES.NS', 'BOSCHLTD.NS', 'SIEMENS.NS',
+    'ECLERX.NS', 'ASAHIINDIA.NS', 'DBREALTY.NS', 'MANKIND.NS', 'TORNTPHARM.NS',
+    'TORNTPOWER.NS', 'ZENSARTECH.NS', 'BALRAMCHIN.NS', 'BHARATFORG.NS', 'TIINDIA.NS',
+    'VIPIND.NS', 'AIAENG.NS', 'SCHNEIDER.NS', 'SAIL.NS', 'POWERGRID.NS',
+    'JSWINFRA.NS', 'DOMS.NS', 'MOTHERSON.NS', 'JSL.NS', 'HAVELLS.NS', 'DEEPAKNTR.NS',
+    'CARBORUNIV.NS', 'GRINDWELL.NS', 'CENTRALBK.NS', 'THERMAX.NS', 'JWL.NS',
+    'NAUKRI.NS', 'RHIM.NS', 'KNRCON.NS', 'CELLO.NS', 'MAPMYINDIA.NS',
+    'HEROMOTOCO.NS', 'SBILIFE.NS', 'RBLBANK.NS', 'KIRLOSENG.NS', 'JUSTDIAL.NS',
+    'POWERINDIA.NS', 'SYNGENE.NS', 'FINPIPE.NS', 'INDIANB.NS', 'SONACOMS.NS',
+    'JINDALSTEL.NS', 'FSL.NS', 'HAL.NS', 'GLENMARK.NS', 'HSCL.NS', 'SCHAEFFLER.NS',
+    'HDFCBANK.NS', 'CENTURYPLY.NS', 'SUNDRMFAST.NS', 'QUESS.NS', 'TATAELXSI.NS',
+    'INDUSINDBK.NS', 'HBLENGINE.NS', 'NHPC.NS', 'FLUOROCHEM.NS', 'PHOENIXLTD.NS',
+    'METROBRAND.NS', 'UPL.NS', 'LINDEINDIA.NS', 'KPIL.NS', 'KALYANKJIL.NS',
+    'ATUL.NS', 'TATASTEEL.NS', 'AUBANK.NS', 'MANAPPURAM.NS', 'NMDC.NS',
+    'TATACONSUM.NS', 'M&M.NS', 'MARUTI.NS', 'PFC.NS', 'PRAJIND.NS', 'TECHNOE.NS',
+    'J&KBANK.NS', 'CHEMPLASTS.NS', 'LTTS.NS', 'JBCHEPHARM.NS', 'AFFLE.NS',
+    'KAJARIACER.NS', 'UCOBANK.NS', 'ELGIEQUIP.NS', 'TATACOMM.NS', 'IIFL.NS',
+    'HINDZINC.NS', 'RAYMOND.NS', 'MUTHOOTFIN.NS', 'AWL.NS', 'UTIAMC.NS', 'ELECON.NS',
+    'NATIONALUM.NS', 'ICICIBANK.NS', 'SHYAMMETL.NS', 'MANYAVAR.NS', 'NLCINDIA.NS',
+    'MFSL.NS', 'CHALET.NS', 'COALINDIA.NS', 'ENDURANCE.NS', 'PETRONET.NS',
+    'BLUESTARCO.NS', 'AARTIIND.NS', 'CIEINDIA.NS', 'CLEAN.NS', 'IGL.NS',
+    'PERSISTENT.NS', 'APOLLOTYRE.NS', 'KOTAKBANK.NS', 'GUJGASLTD.NS',
+    'ULTRACEMCO.NS', 'ABBOTINDIA.NS', 'VARROC.NS', 'GMRAIRPORT.NS', 'NESTLEIND.NS',
+    'PEL.NS', 'ADANIPOWER.NS', 'JSWENERGY.NS', 'GRANULES.NS', 'ADANIPORTS.NS',
+    'MINDACORP.NS', 'NETWORK18.NS', 'FEDERALBNK.NS', 'HONASA.NS', 'AUROPHARMA.NS',
+    'UNIONBANK.NS', 'CERA.NS', 'MGL.NS', 'ACE.NS', 'CUB.NS', 'BIKAJI.NS',
+    'JUBLPHARMA.NS', 'SOLARINDS.NS', 'BBTC.NS', 'ABFRL.NS', 'TATAPOWER.NS',
+    'POLYCAB.NS', 'TIMKEN.NS', 'TCS.NS', 'SPARC.NS', 'ZFCVINDIA.NS', 'FINEORG.NS',
+    'RENUKA.NS', 'CANBK.NS', 'ADANIGREEN.NS', 'GRINFRA.NS', 'MSUMI.NS',
+    'TATACHEM.NS', 'RRKABEL.NS', 'RELIANCE.NS', 'HEG.NS', 'SUPREMEIND.NS',
+    'WELSPUNLIV.NS', 'PNB.NS', 'PAGEIND.NS', 'ICICIGI.NS', 'NUVOCO.NS', 'NTPC.NS',
+    'CESC.NS', 'RATNAMANI.NS', 'DATAPATTNS.NS', 'GMDCLTD.NS', 'CRISIL.NS',
+    'BSOFT.NS', 'TATATECH.NS', 'RITES.NS', 'GRSE.NS', 'APOLLOHOSP.NS', 'TRIDENT.NS',
+    'APLAPOLLO.NS', 'JKLAKSHMI.NS', 'SAREGAMA.NS', 'ESCORTS.NS', 'TVSMOTOR.NS',
+    'SBFC.NS', 'ALOKINDS.NS', 'HDFCLIFE.NS', 'BHEL.NS', 'JUBLINGREA.NS',
+    'CGPOWER.NS', 'CAMPUS.NS', 'TITAGARH.NS', 'VOLTAS.NS', 'BIRLACORPN.NS',
+    'JKCEMENT.NS', 'NATCOPHARM.NS', 'DLF.NS', 'CAMS.NS', 'MARICO.NS', 'POLYMED.NS',
+    'MAXHEALTH.NS', 'BASF.NS', 'PGHH.NS', 'JBMA.NS', 'JSWSTEEL.NS', 'INOXINDIA.NS',
+    'GNFC.NS', 'BAJAJHLDNG.NS', 'DMART.NS', 'ITC.NS', 'INDGN.NS', 'PIIND.NS',
+    'OFSS.NS', 'IDFCFIRSTB.NS', 'EXIDEIND.NS', 'IFCI.NS', 'PFIZER.NS', 'KEC.NS',
+    'SIGNATURE.NS', 'JYOTICNC.NS', 'ISEC.NS', 'CROMPTON.NS', 'ASTERDM.NS',
+    'NIACL.NS', 'GICRE.NS', 'BRITANNIA.NS', 'MRPL.NS', 'HONAUT.NS', 'MAHABANK.NS',
+    '3MINDIA.NS', 'DRREDDY.NS', 'CHAMBLFERT.NS', 'INDIAMART.NS', 'SRF.NS',
+    'SONATSOFTW.NS', 'PATANJALI.NS', 'ABREL.NS', 'RAJESHEXPO.NS', 'CEATLTD.NS',
+    'COCHINSHIP.NS', 'FINCABLES.NS', 'GPPL.NS', 'HFCL.NS', 'ALKYLAMINE.NS',
+    'VINATIORGA.NS', 'ANANDRATHI.NS', 'ABB.NS', 'INOXWIND.NS', 'IRB.NS', 'SUZLON.NS',
+    'ASTRAZEN.NS', 'SUNPHARMA.NS', 'ITI.NS', 'GSPL.NS', 'TATAMOTORS.NS',
+    'CHENNPETRO.NS', 'POONAWALLA.NS', 'AJANTPHARM.NS', 'CAPLIPOINT.NS', 'PVRINOX.NS',
+    'JUBLFOOD.NS', 'AMBUJACEM.NS', 'MAZDOCK.NS', 'KSB.NS', 'ARE&M.NS', 'IOB.NS',
+    'IOC.NS', 'EQUITASBNK.NS', 'LICI.NS', 'TBOTEK.NS', 'GODREJIND.NS',
+    'BHARTIHEXA.NS', 'ADANIENT.NS', 'RAMCOCEM.NS', 'IRFC.NS', 'EMCURE.NS',
+    'GODREJPROP.NS', 'YESBANK.NS', 'WIPRO.NS', 'NBCC.NS', 'BLUEDART.NS', 'MRF.NS',
+    'GODREJAGRO.NS', 'OLECTRA.NS', 'INTELLECT.NS', 'ASHOKLEY.NS', 'CONCORDBIO.NS',
+    'GLAND.NS', 'OIL.NS', 'SJVN.NS', 'COLPAL.NS', 'RKFORGE.NS', 'MASTEK.NS',
+    'INDIGO.NS', 'DALBHARAT.NS', 'ACC.NS', 'BALKRISIND.NS', 'NSLNISP.NS', 'SUNTV.NS',
+    'JKTYRE.NS', 'HINDUNILVR.NS', 'BAJAJ_AUTO.NS', 'ZOMATO.NS', 'BEL.NS',
+    'UNITDSPR.NS', 'TATAINVEST.NS', 'LATENTVIEW.NS', 'SKFINDIA.NS', 'SHREECEM.NS',
+    'TRIVENI.NS', 'BAJAJFINSV.NS', 'ACI.NS', 'BDL.NS', 'ZYDUSLIFE.NS', 'HCLTECH.NS',
+    'NETWEB.NS', 'ERIS.NS', 'ANANTRAJ.NS', 'NEWGEN.NS', 'GILLETTE.NS', 'TTML.NS',
+    'IRCON.NS', 'SOBHA.NS', 'GRASIM.NS', 'RAILTEL.NS', 'BATAINDIA.NS',
+    'HINDCOPPER.NS', 'GPIL.NS', 'LT.NS', 'ONGC.NS', 'BHARTIARTL.NS', 'JYOTHYLAB.NS',
+    'RVNL.NS', 'GAIL.NS', 'CONCOR.NS', 'ENGINERSIN.NS', 'ALKEM.NS', 'KFINTECH.NS',
+    'MOTILALOFS.NS', 'BANKBARODA.NS', 'CIPLA.NS', 'IEX.NS', 'LEMONTREE.NS',
+    'INDHOTEL.NS', 'MAHSEAMLES.NS', 'NUVAMA.NS', 'SBIN.NS', 'ATGL.NS',
+    'KANSAINER.NS', 'UBL.NS', 'JIOFIN.NS', 'APTUS.NS', 'KIMS.NS', 'PPLPHARMA.NS',
+    'TANLA.NS', 'INDUSTOWER.NS', 'SWSOLAR.NS', 'PIDILITIND.NS', 'TECHM.NS',
+    'PCBL.NS', 'SAMMAANCAP.NS', 'BAJFINANCE.NS', 'ABCAPITAL.NS', 'PAYTM.NS',
+    'CUMMINSIND.NS', 'GRAPHITE.NS', 'DABUR.NS', 'RCF.NS', 'PRESTIGE.NS',
+    'LAURUSLABS.NS', 'LODHA.NS', 'LUPIN.NS', 'CDSL.NS', 'IDBI.NS', 'RTNINDIA.NS',
+    'JINDALSAW.NS', 'BPCL.NS', 'IRCTC.NS', 'BEML.NS', 'ASIANPAINT.NS',
+    'METROPOLIS.NS', 'EASEMYTRIP.NS', 'SANOFI.NS', 'NH.NS', 'TEJASNET.NS',
+    'BAYERCROP.NS', 'CANFINHOME.NS', 'AXISBANK.NS', 'GSFC.NS', 'COFORGE.NS',
+    'CCL.NS', 'SUVENPHAR.NS', 'PTCIL.NS', 'ICICIPRULI.NS', 'WHIRLPOOL.NS',
+    'BRIGADE.NS', 'LALPATHLAB.NS', 'LTIM.NS', 'HINDPETRO.NS', 'KPRMILL.NS',
+    'SUNDARMFIN.NS', 'CYIENT.NS', 'FACT.NS', 'RECLTD.NS', 'EIHOTEL.NS', 'HDFCAMC.NS',
+    'IREDA.NS', 'MMTC.NS', 'SUMICHEM.NS', 'EIDPARRY.NS', 'M&MFIN.NS', 'VBL.NS',
+    'SWANENERGY.NS', 'TVSSCS.NS', 'OBEROIRLTY.NS', 'EICHERMOT.NS', 'KARURVYSYA.NS',
+    'ZEEL.NS', 'BANDHANBNK.NS', 'BANKINDIA.NS', 'CREDITACC.NS', 'NCC.NS',
+    'JPPOWER.NS', 'DIXON.NS', 'VGUARD.NS', 'RADICO.NS', 'NYKAA.NS', 'DEEPAKFERT.NS',
+    'INFY.NS', 'AAVAS.NS', 'MEDANTA.NS', 'LICHSGFIN.NS', 'BERGEPAINT.NS',
+    'ADANIENSOL.NS', 'KEI.NS', 'BIOCON.NS', 'SYRMA.NS', 'GLAXO.NS', 'BLS.NS',
+    'UNOMINDA.NS', 'GODREJCP.NS', 'CHOLAFIN.NS', 'FORTIS.NS', 'AADHARHFC.NS',
+    'SBICARD.NS', 'MPHASIS.NS', 'NAM_INDIA.NS', 'LTF.NS', 'IPCALAB.NS', 'SCI.NS',
+    'JMFINANCIL.NS', 'DIVISLAB.NS', 'KPITTECH.NS', 'DEVYANI.NS', 'SHRIRAMFIN.NS',
+    'UJJIVANSFB.NS', 'TITAN.NS', 'HUDCO.NS', 'ANGELONE.NS', 'PNBHOUSING.NS',
+    'GAEL.NS', 'POLICYBZR.NS', 'BSE.NS', 'MCX.NS', 'AVANTIFEED.NS', 'GODFRYPHLP.NS',
+    'COROMANDEL.NS', 'AKUMS.NS', 'AMBER.NS', 'LLOYDSME.NS', 'CGCL.NS', 'KAYNES.NS',
+    'RAINBOW.NS', 'CHOLAHLDNG.NS', 'VIJAYA.NS', 'FIVESTAR.NS'
+]
+
+# =============================================================================
+# MAIN FUNCTIONS
+# =============================================================================
+
+def init_supabase() -> Client:
+    """Initialize Supabase client"""
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def fetch_ohlc_data(ticker: str) -> list:
+    """Fetch OHLC data for a single ticker"""
+    try:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=DAYS_HISTORY)
+        
+        stock = yf.Ticker(ticker)
+        df = stock.history(start=start_date, end=end_date)
+        
+        if df.empty:
+            return []
+        
+        records = []
+        for date, row in df.iterrows():
+            records.append({
+                'ticker': ticker,
+                'snapshot_date': date.strftime('%Y-%m-%d'),
+                'open': float(row['Open']),
+                'high': float(row['High']),
+                'low': float(row['Low']),
+                'close': float(row['Close']),
+                'volume': int(row['Volume'])
+            })
+        
+        return records
+        
+    except Exception as e:
+        print(f"  ⚠️  Error fetching {ticker}: {e}")
+        return []
+
+def cleanup_old_data(supabase: Client, days_to_keep: int = 60):
+    """Delete data older than specified days"""
+    try:
+        cutoff_date = (datetime.now() - timedelta(days=days_to_keep)).strftime('%Y-%m-%d')
+        response = supabase.table('daily_stock_snapshots')\
+            .delete()\
+            .lt('snapshot_date', cutoff_date)\
+            .execute()
+        deleted = len(response.data) if response.data else 0
+        print(f"🗑️  Cleaned up {deleted:,} old records (before {cutoff_date})")
+    except Exception as e:
+        print(f"⚠️  Cleanup error: {e}")
+
+def main():
+    """Main execution"""
+    print("=" * 80)
+    print("📊 NIFTY 500 OHLC DATA FETCHER")
+    print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 80)
+    
+    supabase = init_supabase()
+    
+    total_records = 0
+    successful = 0
+    failed = 0
+    
+    for i, ticker in enumerate(NIFTY_500_TICKERS, 1):
+        # Progress indicator
+        if i % 10 == 0 or i == 1:
+            print(f"\n[{i}/{len(NIFTY_500_TICKERS)}] Progress: {(i/len(NIFTY_500_TICKERS)*100):.1f}%")
+        
+        # Fetch data
+        records = fetch_ohlc_data(ticker)
+        
+        if records:
+            # Upsert to Supabase
+            try:
+                supabase.table('daily_stock_snapshots').upsert(
+                    records,
+                    on_conflict='ticker,snapshot_date'
+                ).execute()
+                
+                total_records += len(records)
+                successful += 1
+                print(f"  ✅ {ticker:20} - {len(records)} records")
+                
+            except Exception as e:
+                failed += 1
+                print(f"  ❌ {ticker:20} - DB error: {e}")
+        else:
+            failed += 1
+        
+        # Rate limiting
+        time.sleep(RATE_LIMIT_DELAY)
+    
+    # Cleanup old data
+    print("\n" + "=" * 80)
+    cleanup_old_data(supabase, days_to_keep=60)
+    
+    # Summary
+    print("\n" + "=" * 80)
+    print("📈 SUMMARY")
+    print("=" * 80)
+    print(f"✅ Successful: {successful}/{len(NIFTY_500_TICKERS)}")
+    print(f"❌ Failed: {failed}/{len(NIFTY_500_TICKERS)}")
+    print(f"💾 Total records: {total_records:,}")
+    print(f"Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 80)
+
+if __name__ == "__main__":
+    main()
