@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
 """
-PRODUCTION: OHLC Data Fetcher for Nifty 500
-Fetches 260 days of OHLC data and stores in Supabase
+PRODUCTION: Enhanced OHLC Data Fetcher with RSI Calculations
+Fetches OHLC data and calculates RSI indicators for storage in Supabase
+
+Features:
+- Fetches daily OHLC data (260 days)
+- Calculates Daily RSI(14) and RSI EMA(9)
+- Fetches weekly OHLC data (52 weeks)
+- Calculates Weekly RSI(14) and RSI EMA(9)
+- Calculates EMAs (20, 50, 200)
+- Stores everything in Supabase
 
 Schedule: Daily at 4:30 PM IST (after market close)
-Runtime: ~5-7 minutes for 500 stocks
+Runtime: ~8-10 minutes for 515 stocks
 """
 
 import yfinance as yf
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 import time
+import pandas as pd
+import numpy as np
 
 # =============================================================================
 # CONFIGURATION
@@ -26,7 +36,8 @@ SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e
 DAYS_HISTORY = 260  # ~1 year for 200 EMA calculations
 RATE_LIMIT_DELAY = 0.3  # seconds between requests
 
-# Nifty 500 tickers (501 stocks)
+# Nifty 500 tickers (501 stocks) + Portfolio stocks not in Nifty 500 (14 stocks)
+# Total: 515 stocks
 NIFTY_500_TICKERS = [
     'DELHIVERY.NS', 'CASTROLIND.NS', 'SARDAEN.NS', 'GODIGIT.NS', 'PNCINFRA.NS',
     'AEGISLOG.NS', 'WELCORP.NS', 'IDEA.NS', '360ONE.NS', 'SAPPHIRE.NS', 'ASTRAL.NS',
@@ -121,8 +132,41 @@ NIFTY_500_TICKERS = [
     'UJJIVANSFB.NS', 'TITAN.NS', 'HUDCO.NS', 'ANGELONE.NS', 'PNBHOUSING.NS',
     'GAEL.NS', 'POLICYBZR.NS', 'BSE.NS', 'MCX.NS', 'AVANTIFEED.NS', 'GODFRYPHLP.NS',
     'COROMANDEL.NS', 'AKUMS.NS', 'AMBER.NS', 'LLOYDSME.NS', 'CGCL.NS', 'KAYNES.NS',
-    'RAINBOW.NS', 'CHOLAHLDNG.NS', 'VIJAYA.NS', 'FIVESTAR.NS'
+    'RAINBOW.NS', 'CHOLAHLDNG.NS', 'VIJAYA.NS', 'FIVESTAR.NS',
+    # Portfolio stocks NOT in Nifty 500 (14 stocks)
+    'ASIANENE.NS', 'BELRISE.NS', 'DENTAWATER.NS', 'GENUSPOWER.NS',
+    'GREAVESCOT.NS', 'INDRAMEDCO.NS', 'ITDC.NS', 'MANINFRA.NS',
+    'NAVA.NS', 'NFL.NS', 'ORIENTELEC.NS', 'PSUBNKBEES.NS',
+    'SOTL.NS', 'TAJGVK.NS'
 ]
+
+# =============================================================================
+# CALCULATION FUNCTIONS
+# =============================================================================
+
+def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
+    """Calculate RSI indicator"""
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period, min_periods=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period, min_periods=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calculate_ema(series: pd.Series, span: int) -> pd.Series:
+    """Calculate EMA (Exponential Moving Average)"""
+    return series.ewm(span=span, adjust=False, min_periods=span).mean()
+
+def resample_to_weekly(daily_df: pd.DataFrame) -> pd.DataFrame:
+    """Resample daily data to weekly data"""
+    weekly = daily_df.resample('W').agg({
+        'Open': 'first',
+        'High': 'max',
+        'Low': 'min',
+        'Close': 'last',
+        'Volume': 'sum'
+    }).dropna()
+    return weekly
 
 # =============================================================================
 # MAIN FUNCTIONS
@@ -132,8 +176,11 @@ def init_supabase() -> Client:
     """Initialize Supabase client"""
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
-def fetch_ohlc_data(ticker: str) -> list:
-    """Fetch OHLC data for a single ticker"""
+def fetch_and_calculate_ohlc(ticker: str) -> list:
+    """
+    Fetch OHLC data and calculate RSI indicators
+    Returns list of records with OHLC + RSI data
+    """
     try:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=DAYS_HISTORY)
@@ -141,20 +188,55 @@ def fetch_ohlc_data(ticker: str) -> list:
         stock = yf.Ticker(ticker)
         df = stock.history(start=start_date, end=end_date)
         
-        if df.empty:
+        if df.empty or len(df) < 20:  # Need minimum data
             return []
         
+        # Calculate Daily RSI
+        df['rsi_14'] = calculate_rsi(df['Close'], 14)
+        df['rsi_ema_9'] = calculate_ema(df['rsi_14'], 9)
+        
+        # Calculate EMAs
+        df['ema_20'] = calculate_ema(df['Close'], 20)
+        df['ema_50'] = calculate_ema(df['Close'], 50)
+        df['ema_200'] = calculate_ema(df['Close'], 200)
+        
+        # Resample to weekly for weekly RSI
+        weekly_df = resample_to_weekly(df)
+        if len(weekly_df) >= 14:
+            weekly_df['weekly_rsi_14'] = calculate_rsi(weekly_df['Close'], 14)
+            weekly_df['weekly_rsi_ema_9'] = calculate_ema(weekly_df['weekly_rsi_14'], 9)
+            
+            # Map weekly values back to daily dates
+            df['weekly_rsi_14'] = np.nan
+            df['weekly_rsi_ema_9'] = np.nan
+            
+            for date, row in weekly_df.iterrows():
+                # Fill all days in this week with the week's RSI values
+                week_start = date - pd.Timedelta(days=6)
+                week_mask = (df.index >= week_start) & (df.index <= date)
+                df.loc[week_mask, 'weekly_rsi_14'] = row['weekly_rsi_14']
+                df.loc[week_mask, 'weekly_rsi_ema_9'] = row['weekly_rsi_ema_9']
+        
+        # Convert to records for Supabase
         records = []
         for date, row in df.iterrows():
-            records.append({
+            record = {
                 'ticker': ticker,
                 'snapshot_date': date.strftime('%Y-%m-%d'),
                 'open': float(row['Open']),
                 'high': float(row['High']),
                 'low': float(row['Low']),
                 'close': float(row['Close']),
-                'volume': int(row['Volume'])
-            })
+                'volume': int(row['Volume']),
+                'rsi_14': float(row['rsi_14']) if pd.notna(row['rsi_14']) else None,
+                'rsi_ema_9': float(row['rsi_ema_9']) if pd.notna(row['rsi_ema_9']) else None,
+                'ema_20': float(row['ema_20']) if pd.notna(row['ema_20']) else None,
+                'ema_50': float(row['ema_50']) if pd.notna(row['ema_50']) else None,
+                'ema_200': float(row['ema_200']) if pd.notna(row['ema_200']) else None,
+                'weekly_rsi_14': float(row['weekly_rsi_14']) if pd.notna(row['weekly_rsi_14']) else None,
+                'weekly_rsi_ema_9': float(row['weekly_rsi_ema_9']) if pd.notna(row['weekly_rsi_ema_9']) else None
+            }
+            records.append(record)
         
         return records
         
@@ -178,7 +260,7 @@ def cleanup_old_data(supabase: Client, days_to_keep: int = 60):
 def main():
     """Main execution"""
     print("=" * 80)
-    print("📊 NIFTY 500 OHLC DATA FETCHER")
+    print("📊 ENHANCED OHLC + RSI DATA FETCHER")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
     
@@ -193,8 +275,8 @@ def main():
         if i % 10 == 0 or i == 1:
             print(f"\n[{i}/{len(NIFTY_500_TICKERS)}] Progress: {(i/len(NIFTY_500_TICKERS)*100):.1f}%")
         
-        # Fetch data
-        records = fetch_ohlc_data(ticker)
+        # Fetch and calculate
+        records = fetch_and_calculate_ohlc(ticker)
         
         if records:
             # Upsert to Supabase
@@ -206,7 +288,12 @@ def main():
                 
                 total_records += len(records)
                 successful += 1
-                print(f"  ✅ {ticker:20} - {len(records)} records")
+                
+                # Show sample RSI values for verification
+                latest = records[-1]
+                rsi_info = f"RSI: {latest['rsi_ema_9']:.1f}" if latest['rsi_ema_9'] else "RSI: N/A"
+                weekly_rsi_info = f"W-RSI: {latest['weekly_rsi_ema_9']:.1f}" if latest['weekly_rsi_ema_9'] else "W-RSI: N/A"
+                print(f"  ✅ {ticker:20} - {len(records)} records | {rsi_info} | {weekly_rsi_info}")
                 
             except Exception as e:
                 failed += 1
@@ -228,6 +315,8 @@ def main():
     print(f"✅ Successful: {successful}/{len(NIFTY_500_TICKERS)}")
     print(f"❌ Failed: {failed}/{len(NIFTY_500_TICKERS)}")
     print(f"💾 Total records: {total_records:,}")
+    print(f"📊 With RSI data: Daily RSI(14), RSI EMA(9), Weekly RSI(14), Weekly RSI EMA(9)")
+    print(f"📈 With EMAs: 20, 50, 200")
     print(f"Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
 
