@@ -229,12 +229,14 @@ def check_blue_zone_signal(
     - Weekly RSI EMA(9) >= 70
     - Within 10% of 52W high
     - Above EMA 50
+    - Volume > 1.5x average (REQUIRED for Strong Buy)
     
     Buy:
     - Daily RSI EMA(9) >= 70
     - Weekly RSI EMA(9) >= 60
     - Within 10% of 52W high
     - Above EMA 20
+    - No volume requirement
     """
     if len(daily_df) < 50:
         return None
@@ -264,7 +266,7 @@ def check_blue_zone_signal(
         if distance_from_52w_high < -10:
             return None
         
-        # Calculate volume ratio (for display only, not filtering)
+        # Calculate volume ratio
         avg_volume = daily_df['volume'].tail(20).mean()
         current_volume = latest['volume']
         volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
@@ -273,14 +275,15 @@ def check_blue_zone_signal(
         above_ema_50 = current_price > ema_50 if pd.notna(ema_50) else False
         above_ema_20 = current_price > ema_20 if pd.notna(ema_20) else False
         
-        # STRONG BUY: Daily RSI >= 75, Weekly RSI >= 70, Within 10% of 52W high, Above EMA 50
+        # STRONG BUY: Daily RSI >= 75, Weekly RSI >= 70, Within 10%, Above EMA 50, Volume > 1.5x
         if (daily_rsi_ema_9 >= 75 and 
             weekly_rsi_ema_9 >= 70 and 
             distance_from_52w_high >= -10 and
-            above_ema_50):
+            above_ema_50 and
+            volume_ratio > 1.5):  # Volume required for Strong Buy
             signal_strength = 'strong'
             signal_type = 'blue_zone_strong'
-        # BUY: Daily RSI >= 70, Weekly RSI >= 60, Within 10% of 52W high, Above EMA 20
+        # BUY: Daily RSI >= 70, Weekly RSI >= 60, Within 10%, Above EMA 20 (NO volume requirement)
         elif (daily_rsi_ema_9 >= 70 and 
               weekly_rsi_ema_9 >= 60 and 
               distance_from_52w_high >= -10 and
