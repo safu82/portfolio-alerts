@@ -678,11 +678,11 @@ def main():
     tickers = sorted(list(set(all_tickers)))
     print(f"✅ Found {len(tickers)} unique stocks in database")
     
+    # Cleanup old signals BEFORE scanning (to prevent deleting new signals)
+    cleanup_old_signals(supabase)
+    
     # Scan all stocks
     stats, multiple_signals = scan_all_stocks(supabase, tickers)
-    
-    # Cleanup old signals
-    cleanup_old_signals(supabase)
     
     # Print summary
     print("\n" + "=" * 80)
