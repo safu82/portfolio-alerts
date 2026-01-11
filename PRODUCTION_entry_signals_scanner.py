@@ -133,26 +133,6 @@ def fetch_stock_data_from_supabase(supabase: Client, ticker: str, days: int = 60
     except Exception as e:
         return None
 
-def fetch_weekly_data(ticker: str, weeks: int = 52) -> Optional[pd.DataFrame]:
-    """
-    Fetch weekly OHLC data from Yahoo Finance
-    """
-    try:
-        stock = yf.Ticker(ticker)
-        end_date = datetime.now()
-        start_date = end_date - timedelta(weeks=weeks)
-        
-        df = stock.history(start=start_date, end=end_date, interval='1wk')
-        
-        if df.empty:
-            return None
-        
-        df = df.reset_index()
-        return df
-        
-    except Exception as e:
-        return None
-
 def get_stock_name(ticker: str) -> str:
     """Get stock name from ticker"""
     try:
@@ -230,11 +210,12 @@ def check_narrow_cpr_breakaway(
 
 def check_blue_zone_signal(
     daily_df: pd.DataFrame,
-    weekly_df: Optional[pd.DataFrame],
     current_price: float
 ) -> Optional[Dict]:
     """
     Check for Blue Zone signal (Strong or Buy)
+    
+    UPDATED: Now uses RSI data from Supabase (no weekly fetch needed)
     
     ORIGINAL BOOK CRITERIA (TIGHTENED):
     Strong Buy:
@@ -257,25 +238,25 @@ def check_blue_zone_signal(
         return None
     
     try:
-        # Calculate daily RSI and EMA
-        daily_df['rsi'] = calculate_rsi(daily_df['close'], 14)
-        daily_df['rsi_ema_9'] = calculate_ema(daily_df['rsi'], 9)
-        daily_df['ema_20'] = calculate_ema(daily_df['close'], 20)
-        daily_df['ema_50'] = calculate_ema(daily_df['close'], 50)
-        
         latest = daily_df.iloc[-1]
-        daily_rsi_ema_9 = latest['rsi_ema_9']
+        
+        # Get RSI values from Supabase (pre-calculated)
+        daily_rsi_ema_9 = latest.get('rsi_ema_9')
+        weekly_rsi_ema_9 = latest.get('weekly_rsi_ema_9')
+        ema_20 = latest.get('ema_20')
+        ema_50 = latest.get('ema_50')
+        
+        # Check if RSI data exists
+        if pd.isna(daily_rsi_ema_9):
+            return None  # No RSI data available
         
         # Check daily RSI EMA(9) > 60 (ORIGINAL)
         if daily_rsi_ema_9 <= 60:
             return None
         
-        # Calculate weekly RSI EMA(9) if weekly data available
-        weekly_rsi_ema_9 = None
-        if weekly_df is not None and len(weekly_df) >= 14:
-            weekly_df['rsi'] = calculate_rsi(weekly_df['Close'], 14)
-            weekly_df['rsi_ema_9'] = calculate_ema(weekly_df['rsi'], 9)
-            weekly_rsi_ema_9 = weekly_df['rsi_ema_9'].iloc[-1]
+        # Check weekly RSI EMA(9) exists
+        if pd.isna(weekly_rsi_ema_9):
+            return None  # Cannot determine signal strength without weekly RSI
         
         # Calculate 52W high
         high_52w = daily_df['high'].tail(252).max()  # ~252 trading days in a year
@@ -302,14 +283,14 @@ def check_blue_zone_signal(
         if volume_ratio < 1.5:
             return None
         
-        # Determine signal strength
-        above_ema_50 = current_price > latest['ema_50']
-        above_ema_20 = current_price > latest['ema_20']
+        # Determine signal strength based on weekly RSI and EMA position
+        above_ema_50 = current_price > ema_50 if pd.notna(ema_50) else False
+        above_ema_20 = current_price > ema_20 if pd.notna(ema_20) else False
         
-        if weekly_rsi_ema_9 and weekly_rsi_ema_9 > 60 and above_ema_50:
+        if weekly_rsi_ema_9 > 60 and above_ema_50:
             signal_strength = 'strong'
             signal_type = 'blue_zone_strong'
-        elif weekly_rsi_ema_9 and weekly_rsi_ema_9 > 50 and above_ema_20:
+        elif weekly_rsi_ema_9 > 50 and above_ema_20:
             signal_strength = 'regular'
             signal_type = 'blue_zone_buy'
         else:
@@ -319,10 +300,11 @@ def check_blue_zone_signal(
             'signal_type': signal_type,
             'signal_strength': signal_strength,
             'daily_rsi_ema_9': round(daily_rsi_ema_9, 2),
-            'weekly_rsi_ema_9': round(weekly_rsi_ema_9, 2) if weekly_rsi_ema_9 else None,
+            'weekly_rsi_ema_9': round(weekly_rsi_ema_9, 2),
             'distance_from_52w_high': round(distance_from_52w_high, 2),
             'pullback_from_peak': round(pullback_from_peak, 2),
             'above_ema_50': above_ema_50,
+            'above_ema_20': above_ema_20,
             'volume_ratio': round(volume_ratio, 2)
         }
         
@@ -332,6 +314,8 @@ def check_blue_zone_signal(
 def check_200_ema_retest(daily_df: pd.DataFrame, current_price: float) -> Optional[Dict]:
     """
     Check for 200 EMA Power Retest signal
+    
+    UPDATED: Now uses EMA data from Supabase (pre-calculated)
     
     TIGHTENED CRITERIA:
     - Currently within 2% of 200 EMA (was 3%)
@@ -345,13 +329,15 @@ def check_200_ema_retest(daily_df: pd.DataFrame, current_price: float) -> Option
         return None
     
     try:
-        # Calculate EMAs
-        daily_df['ema_50'] = calculate_ema(daily_df['close'], 50)
-        daily_df['ema_200'] = calculate_ema(daily_df['close'], 200)
-        
         latest = daily_df.iloc[-1]
-        ema_50 = latest['ema_50']
-        ema_200 = latest['ema_200']
+        
+        # Get EMA values from Supabase (pre-calculated)
+        ema_50 = latest.get('ema_50')
+        ema_200 = latest.get('ema_200')
+        
+        # Check if EMA data exists
+        if pd.isna(ema_50) or pd.isna(ema_200):
+            return None  # No EMA data available
         
         # Check within 2% of 200 EMA (ORIGINAL)
         distance_from_200ema = ((current_price - ema_200) / ema_200) * 100
@@ -447,11 +433,8 @@ def scan_stock(supabase: Client, ticker: str) -> List[Dict]:
             cpr_signal['price'] = round(current_price, 2)
             signals.append(cpr_signal)
         
-        # Fetch weekly data for Blue Zone
-        weekly_df = fetch_weekly_data(ticker, weeks=52)
-        
-        # Check Blue Zone
-        blue_zone_signal = check_blue_zone_signal(daily_df, weekly_df, current_price)
+        # Check Blue Zone (uses RSI data from Supabase, no weekly fetch needed)
+        blue_zone_signal = check_blue_zone_signal(daily_df, current_price)
         if blue_zone_signal:
             blue_zone_signal['ticker'] = ticker
             blue_zone_signal['stock_name'] = stock_name
