@@ -33,7 +33,7 @@ import os
 SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://hcgyncghmcvylnrmcivj.supabase.co')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjZ3luY2dobWN2eWxucm1jaXZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc1MTQwMTEsImV4cCI6MjA3MzA5MDAxMX0.n8vFVCJe1y_3o8fpAY0IgasZ4eKl7DAogEM3OlHB8Ww')
 
-DAYS_HISTORY = 260  # ~1 year for 200 EMA calculations
+DAYS_HISTORY = 400  # Increased from 260 to ensure EMA 200 has enough data (~200 days minimum + buffer)
 RATE_LIMIT_DELAY = 0.3  # seconds between requests
 
 # Nifty 500 tickers (501 stocks) + Portfolio stocks not in Nifty 500 (14 stocks)
