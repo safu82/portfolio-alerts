@@ -153,23 +153,32 @@ def check_narrow_cpr_breakaway(
     """
     Check for Narrow CPR Breakaway signal
     
-    TIGHTENED Criteria:
-    - CPR width < 0.3% (very narrow, not 0.5%)
-    - Price at L3 support (within 0.5%, not 1%) for reversal buy
+    CRITERIA:
+    - CPR width < 0.3% (very narrow)
+    - Price at L3 support (within 0.5%)
     - Must have volume confirmation (> 1.2x average)
+    
+    NOTE: CPR is calculated from PREVIOUS trading day's high/low/close
+          Current price is checked against L3 level
     """
     if len(daily_df) < 20:
         return None
     
     try:
-        # Get yesterday's data
-        yesterday = daily_df.iloc[-2]
-        today = daily_df.iloc[-1]
-        high = yesterday['high']
-        low = yesterday['low']
-        close = yesterday['close']
+        # Use the most recent complete day for CPR calculation
+        # iloc[-1] is the latest day in our data
+        # For CPR, we typically use the previous day's data, so use iloc[-1]
+        previous_day = daily_df.iloc[-1]
         
-        # Calculate pivots
+        high = previous_day['high']
+        low = previous_day['low']
+        close = previous_day['close']
+        
+        # Current price to check (passed as parameter)
+        # Volume is from today/latest
+        current_volume = previous_day['volume']
+        
+        # Calculate pivots from previous day
         pivots = calculate_pivot_points(high, low, close)
         
         # Calculate CPR width
@@ -181,14 +190,13 @@ def check_narrow_cpr_breakaway(
         
         # Check if at L3 support (buy signal) - TIGHTER: within 0.5%
         distance_to_l3 = ((current_price - pivots['l3']) / pivots['l3']) * 100
-        at_l3 = abs(distance_to_l3) <= 0.5  # Within 0.5% (was 1%)
+        at_l3 = abs(distance_to_l3) <= 0.5  # Within 0.5%
         
         if not at_l3:
             return None
         
         # Volume confirmation - must have decent volume
         avg_volume = daily_df['volume'].tail(20).mean()
-        current_volume = today['volume']
         volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
         
         if volume_ratio < 1.2:  # At least 1.2x average volume
@@ -203,8 +211,6 @@ def check_narrow_cpr_breakaway(
             'volume_ratio': round(volume_ratio, 2)
         }
         
-        return None
-        
     except Exception as e:
         return None
 
@@ -217,20 +223,18 @@ def check_blue_zone_signal(
     
     UPDATED: Now uses RSI data from Supabase (no weekly fetch needed)
     
-    NEW TIGHTENED CRITERIA (Jan 2026):
+    FINAL CRITERIA (Jan 2026):
     Strong Buy:
-    - Daily RSI EMA(9) >= 75 (was 60)
-    - Weekly RSI EMA(9) >= 70 (was 60)
-    - Within 5% of 52W high (was 15%)
-    - Pulled back 5-10% from recent peak
+    - Daily RSI EMA(9) >= 75
+    - Weekly RSI EMA(9) >= 70
+    - Within 10% of 52W high
     - Above EMA 50
     - Volume > 1.5x average
     
     Buy:
-    - Daily RSI EMA(9) >= 70 (was 60)
-    - Weekly RSI EMA(9) >= 60 (was 50)
-    - Between 5-10% from 52W high (was within 15%)
-    - Pulled back 5-10% from recent peak
+    - Daily RSI EMA(9) >= 70
+    - Weekly RSI EMA(9) >= 60
+    - Within 10% of 52W high
     - Above EMA 20
     - Volume > 1.5x average
     """
@@ -258,12 +262,8 @@ def check_blue_zone_signal(
         high_52w = daily_df['high'].tail(252).max()  # ~252 trading days in a year
         distance_from_52w_high = ((current_price - high_52w) / high_52w) * 100
         
-        # Calculate pullback from recent peak (last 20 days)
-        recent_peak = daily_df['high'].tail(20).max()
-        pullback_from_peak = ((current_price - recent_peak) / recent_peak) * 100
-        
-        # Check pullback 5-10% (ORIGINAL - KEEP)
-        if pullback_from_peak > -5 or pullback_from_peak < -10:
+        # Check within 10% of 52W high
+        if distance_from_52w_high < -10:
             return None
         
         # Calculate volume ratio
@@ -271,26 +271,25 @@ def check_blue_zone_signal(
         current_volume = latest['volume']
         volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
         
-        # Check volume > 1.5x (ORIGINAL - KEEP)
+        # Check volume > 1.5x
         if volume_ratio < 1.5:
             return None
         
-        # Determine signal strength based on NEW CRITERIA
+        # Determine signal strength based on RSI and EMA position
         above_ema_50 = current_price > ema_50 if pd.notna(ema_50) else False
         above_ema_20 = current_price > ema_20 if pd.notna(ema_20) else False
         
-        # STRONG BUY: Daily RSI >= 75, Weekly RSI >= 70, Within 5% of 52W high, Above EMA 50
+        # STRONG BUY: Daily RSI >= 75, Weekly RSI >= 70, Within 10% of 52W high, Above EMA 50
         if (daily_rsi_ema_9 >= 75 and 
             weekly_rsi_ema_9 >= 70 and 
-            distance_from_52w_high >= -5 and  # Within 5% of 52W high
+            distance_from_52w_high >= -10 and
             above_ema_50):
             signal_strength = 'strong'
             signal_type = 'blue_zone_strong'
-        # BUY: Daily RSI >= 70, Weekly RSI >= 60, Between 5-10% from 52W high, Above EMA 20
+        # BUY: Daily RSI >= 70, Weekly RSI >= 60, Within 10% of 52W high, Above EMA 20
         elif (daily_rsi_ema_9 >= 70 and 
               weekly_rsi_ema_9 >= 60 and 
-              distance_from_52w_high >= -10 and  # Not more than 10% below
-              distance_from_52w_high < -5 and    # At least 5% below (between 5-10%)
+              distance_from_52w_high >= -10 and
               above_ema_20):
             signal_strength = 'regular'
             signal_type = 'blue_zone_buy'
@@ -303,7 +302,6 @@ def check_blue_zone_signal(
             'daily_rsi_ema_9': round(daily_rsi_ema_9, 2),
             'weekly_rsi_ema_9': round(weekly_rsi_ema_9, 2),
             'distance_from_52w_high': round(distance_from_52w_high, 2),
-            'pullback_from_peak': round(pullback_from_peak, 2),
             'above_ema_50': above_ema_50,
             'above_ema_20': above_ema_20,
             'volume_ratio': round(volume_ratio, 2)
@@ -318,12 +316,12 @@ def check_200_ema_retest(daily_df: pd.DataFrame, current_price: float) -> Option
     
     UPDATED: Now uses EMA data from Supabase (pre-calculated)
     
-    TIGHTENED CRITERIA:
-    - Currently within 2% of 200 EMA (was 3%)
+    RELAXED CRITERIA (Jan 2026):
+    - Currently within 5% of 200 EMA (was 2%)
     - 50 EMA > 200 EMA
     - 50 EMA rising (today > 10 days ago)
-    - Stock was at least 8% above 200 EMA in last 30 days (was 5%)
-    - Previously came within 2% of 200 EMA in last 90 days
+    - Stock was at least 5% above 200 EMA in last 30 days (was 8%)
+    - Previously came within 5% of 200 EMA in last 90 days (was 2%)
     - Volume on previous touch > 1.3x average
     """
     if len(daily_df) < 180:
@@ -340,9 +338,9 @@ def check_200_ema_retest(daily_df: pd.DataFrame, current_price: float) -> Option
         if pd.isna(ema_50) or pd.isna(ema_200):
             return None  # No EMA data available
         
-        # Check within 2% of 200 EMA (ORIGINAL)
+        # Check within 5% of 200 EMA (RELAXED from 2%)
         distance_from_200ema = ((current_price - ema_200) / ema_200) * 100
-        if abs(distance_from_200ema) > 2:
+        if abs(distance_from_200ema) > 5:
             return None
         
         # Check 50 EMA > 200 EMA
@@ -356,20 +354,20 @@ def check_200_ema_retest(daily_df: pd.DataFrame, current_price: float) -> Option
         if not ema_50_rising:
             return None
         
-        # Check stock was 8%+ above 200 EMA in last 30 days (TIGHTENED from 5%)
+        # Check stock was 5%+ above 200 EMA in last 30 days (RELAXED from 8%)
         last_30_days = daily_df.tail(30).copy()
         last_30_days['distance_200'] = ((last_30_days['close'] - last_30_days['ema_200']) / last_30_days['ema_200']) * 100
         peak_above_200ema_30d = last_30_days['distance_200'].max()
         
-        if peak_above_200ema_30d < 8:
+        if peak_above_200ema_30d < 5:
             return None
         
-        # Check came within 2% of 200 EMA before in last 90 days
+        # Check came within 5% of 200 EMA before in last 90 days (RELAXED from 2%)
         last_90_days = daily_df.tail(90).copy()
         last_90_days['distance_200'] = abs((last_90_days['close'] - last_90_days['ema_200']) / last_90_days['ema_200']) * 100
         
-        # Find instances where stock was within 2% of 200 EMA (ORIGINAL)
-        near_200ema = last_90_days[last_90_days['distance_200'] <= 2]
+        # Find instances where stock was within 5% of 200 EMA
+        near_200ema = last_90_days[last_90_days['distance_200'] <= 5]
         
         if len(near_200ema) < 2:  # Need at least 2 touches (including current)
             return None
@@ -386,7 +384,7 @@ def check_200_ema_retest(daily_df: pd.DataFrame, current_price: float) -> Option
         avg_volume = daily_df['volume'].tail(20).mean()
         previous_volume = previous_touch_row['volume']
         
-        # Check volume on previous touch > 1.3x (ADDED BACK)
+        # Check volume on previous touch > 1.3x
         if previous_volume < avg_volume * 1.3:
             return None
         
