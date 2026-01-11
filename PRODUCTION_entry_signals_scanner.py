@@ -217,19 +217,19 @@ def check_blue_zone_signal(
     
     UPDATED: Now uses RSI data from Supabase (no weekly fetch needed)
     
-    ORIGINAL BOOK CRITERIA (TIGHTENED):
+    NEW TIGHTENED CRITERIA (Jan 2026):
     Strong Buy:
-    - Daily RSI EMA(9) > 60
-    - Weekly RSI EMA(9) > 60
-    - Within 15% of 52W high
+    - Daily RSI EMA(9) >= 75 (was 60)
+    - Weekly RSI EMA(9) >= 70 (was 60)
+    - Within 5% of 52W high (was 15%)
     - Pulled back 5-10% from recent peak
     - Above EMA 50
     - Volume > 1.5x average
     
     Buy:
-    - Daily RSI EMA(9) > 60
-    - Weekly RSI EMA(9) > 50
-    - Within 15% of 52W high
+    - Daily RSI EMA(9) >= 70 (was 60)
+    - Weekly RSI EMA(9) >= 60 (was 50)
+    - Between 5-10% from 52W high (was within 15%)
     - Pulled back 5-10% from recent peak
     - Above EMA 20
     - Volume > 1.5x average
@@ -250,10 +250,6 @@ def check_blue_zone_signal(
         if pd.isna(daily_rsi_ema_9):
             return None  # No RSI data available
         
-        # Check daily RSI EMA(9) > 60 (ORIGINAL)
-        if daily_rsi_ema_9 <= 60:
-            return None
-        
         # Check weekly RSI EMA(9) exists
         if pd.isna(weekly_rsi_ema_9):
             return None  # Cannot determine signal strength without weekly RSI
@@ -262,15 +258,11 @@ def check_blue_zone_signal(
         high_52w = daily_df['high'].tail(252).max()  # ~252 trading days in a year
         distance_from_52w_high = ((current_price - high_52w) / high_52w) * 100
         
-        # Check within 15% of 52W high (ORIGINAL)
-        if distance_from_52w_high < -15:
-            return None
-        
         # Calculate pullback from recent peak (last 20 days)
         recent_peak = daily_df['high'].tail(20).max()
         pullback_from_peak = ((current_price - recent_peak) / recent_peak) * 100
         
-        # Check pullback 5-10% (ORIGINAL)
+        # Check pullback 5-10% (ORIGINAL - KEEP)
         if pullback_from_peak > -5 or pullback_from_peak < -10:
             return None
         
@@ -279,18 +271,27 @@ def check_blue_zone_signal(
         current_volume = latest['volume']
         volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
         
-        # Check volume > 1.5x (ORIGINAL)
+        # Check volume > 1.5x (ORIGINAL - KEEP)
         if volume_ratio < 1.5:
             return None
         
-        # Determine signal strength based on weekly RSI and EMA position
+        # Determine signal strength based on NEW CRITERIA
         above_ema_50 = current_price > ema_50 if pd.notna(ema_50) else False
         above_ema_20 = current_price > ema_20 if pd.notna(ema_20) else False
         
-        if weekly_rsi_ema_9 > 60 and above_ema_50:
+        # STRONG BUY: Daily RSI >= 75, Weekly RSI >= 70, Within 5% of 52W high, Above EMA 50
+        if (daily_rsi_ema_9 >= 75 and 
+            weekly_rsi_ema_9 >= 70 and 
+            distance_from_52w_high >= -5 and  # Within 5% of 52W high
+            above_ema_50):
             signal_strength = 'strong'
             signal_type = 'blue_zone_strong'
-        elif weekly_rsi_ema_9 > 50 and above_ema_20:
+        # BUY: Daily RSI >= 70, Weekly RSI >= 60, Between 5-10% from 52W high, Above EMA 20
+        elif (daily_rsi_ema_9 >= 70 and 
+              weekly_rsi_ema_9 >= 60 and 
+              distance_from_52w_high >= -10 and  # Not more than 10% below
+              distance_from_52w_high < -5 and    # At least 5% below (between 5-10%)
+              above_ema_20):
             signal_strength = 'regular'
             signal_type = 'blue_zone_buy'
         else:
@@ -583,20 +584,35 @@ def scan_all_stocks(supabase: Client, tickers: List[str]) -> Dict:
     return stats, stocks_with_multiple_signals
 
 def cleanup_old_signals(supabase: Client) -> int:
-    """Delete expired signals (older than 5 days)"""
+    """Delete expired signals (older than 5 days) AND today's signals (to prevent duplicates)"""
     try:
+        # Delete old signals (older than 5 days)
         cutoff_date = (datetime.now() - timedelta(days=5)).date()
         
         print(f"\n🗑️  Cleaning up signals older than {cutoff_date}...")
         
-        response = supabase.table('entry_signals')\
+        response_old = supabase.table('entry_signals')\
             .delete()\
             .lt('alert_date', str(cutoff_date))\
             .execute()
         
-        deleted = len(response.data) if response.data else 0
-        print(f"✅ Deleted {deleted} old signals")
-        return deleted
+        deleted_old = len(response_old.data) if response_old.data else 0
+        print(f"✅ Deleted {deleted_old} old signals")
+        
+        # Delete TODAY's signals (to prevent duplicates if scanner runs multiple times)
+        today = datetime.now().date()
+        
+        print(f"🗑️  Clearing today's signals ({today}) to prevent duplicates...")
+        
+        response_today = supabase.table('entry_signals')\
+            .delete()\
+            .eq('alert_date', str(today))\
+            .execute()
+        
+        deleted_today = len(response_today.data) if response_today.data else 0
+        print(f"✅ Deleted {deleted_today} signals from today")
+        
+        return deleted_old + deleted_today
         
     except Exception as e:
         print(f"❌ Cleanup failed: {e}")
