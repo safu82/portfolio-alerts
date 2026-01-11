@@ -229,14 +229,12 @@ def check_blue_zone_signal(
     - Weekly RSI EMA(9) >= 70
     - Within 10% of 52W high
     - Above EMA 50
-    - Volume > 1.5x average
     
     Buy:
     - Daily RSI EMA(9) >= 70
     - Weekly RSI EMA(9) >= 60
     - Within 10% of 52W high
     - Above EMA 20
-    - Volume > 1.5x average
     """
     if len(daily_df) < 50:
         return None
@@ -266,14 +264,10 @@ def check_blue_zone_signal(
         if distance_from_52w_high < -10:
             return None
         
-        # Calculate volume ratio
+        # Calculate volume ratio (for display only, not filtering)
         avg_volume = daily_df['volume'].tail(20).mean()
         current_volume = latest['volume']
         volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
-        
-        # Check volume > 1.5x
-        if volume_ratio < 1.5:
-            return None
         
         # Determine signal strength based on RSI and EMA position
         above_ema_50 = current_price > ema_50 if pd.notna(ema_50) else False
