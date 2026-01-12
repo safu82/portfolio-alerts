@@ -451,10 +451,24 @@ def scan_stock(supabase: Client, ticker: str) -> List[Dict]:
         return signals
 
 def save_signals_to_supabase(supabase: Client, signals: List[Dict]) -> bool:
-    """Save entry signals to Supabase"""
+    """Save entry signals to Supabase with atomic delete-then-insert"""
     try:
         if not signals:
             return True
+        
+        today = str(datetime.now().date())
+        
+        # ATOMIC OPERATION: Delete today's signals first, then insert new ones
+        # This prevents duplicates if scanner runs multiple times in a day
+        print(f"  🗑️  Clearing today's signals ({today}) atomically...")
+        
+        delete_response = supabase.table('entry_signals')\
+            .delete()\
+            .eq('alert_date', today)\
+            .execute()
+        
+        deleted_count = len(delete_response.data) if delete_response.data else 0
+        print(f"  ✅ Deleted {deleted_count} existing signals for today")
         
         # Prepare records for insertion
         records = []
@@ -485,17 +499,16 @@ def save_signals_to_supabase(supabase: Client, signals: List[Dict]) -> bool:
                 'signal_type': signal_type,
                 'signal_strength': signal_strength,
                 'price': price,
-                'alert_date': str(datetime.now().date()),
+                'alert_date': today,  # Use today variable for consistency
                 'details': details
             }
             records.append(record)
         
-        # Upsert to Supabase (insert or update)
-        response = supabase.table('entry_signals').upsert(
-            records,
-            on_conflict='ticker,signal_type,alert_date'
-        ).execute()
+        # Insert new signals (no conflict possible since we deleted first)
+        print(f"  💾 Inserting {len(records)} new signals...")
+        response = supabase.table('entry_signals').insert(records).execute()
         
+        print(f"  ✅ Successfully saved {len(records)} signals")
         return True
         
     except Exception as e:
@@ -579,35 +592,21 @@ def scan_all_stocks(supabase: Client, tickers: List[str]) -> Dict:
     return stats, stocks_with_multiple_signals
 
 def cleanup_old_signals(supabase: Client) -> int:
-    """Delete expired signals (older than 5 days) AND today's signals (to prevent duplicates)"""
+    """Delete expired signals (older than 5 days only)"""
     try:
-        # Delete old signals (older than 5 days)
         cutoff_date = (datetime.now() - timedelta(days=5)).date()
         
         print(f"\n🗑️  Cleaning up signals older than {cutoff_date}...")
         
-        response_old = supabase.table('entry_signals')\
+        response = supabase.table('entry_signals')\
             .delete()\
             .lt('alert_date', str(cutoff_date))\
             .execute()
         
-        deleted_old = len(response_old.data) if response_old.data else 0
-        print(f"✅ Deleted {deleted_old} old signals")
+        deleted = len(response.data) if response.data else 0
+        print(f"✅ Deleted {deleted} old signals")
         
-        # Delete TODAY's signals (to prevent duplicates if scanner runs multiple times)
-        today = datetime.now().date()
-        
-        print(f"🗑️  Clearing today's signals ({today}) to prevent duplicates...")
-        
-        response_today = supabase.table('entry_signals')\
-            .delete()\
-            .eq('alert_date', str(today))\
-            .execute()
-        
-        deleted_today = len(response_today.data) if response_today.data else 0
-        print(f"✅ Deleted {deleted_today} signals from today")
-        
-        return deleted_old + deleted_today
+        return deleted
         
     except Exception as e:
         print(f"❌ Cleanup failed: {e}")
