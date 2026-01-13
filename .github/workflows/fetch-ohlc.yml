@@ -2,7 +2,7 @@ name: Fetch OHLC Data
 
 on:
   schedule:
-    - cron: '30 13 * * *'  # 7:00 PM IST (13:30 UTC)
+    - cron: '30 1 * * *'  # 7:00 AM IST (1:30 UTC)
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
