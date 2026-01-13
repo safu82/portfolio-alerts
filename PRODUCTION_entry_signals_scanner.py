@@ -307,6 +307,135 @@ def check_blue_zone_signal(
     except Exception as e:
         return None
 
+def check_golden_cross(daily_df: pd.DataFrame, current_price: float) -> Optional[Dict]:
+    """
+    Check for Golden Cross signal (20 EMA crossing above 50 EMA)
+    
+    CRITERIA:
+    Strong Buy (more convincing):
+    - Crossover 1-3 days old
+    - Price > both 50 EMA AND 200 EMA
+    - Volume > 2x (20-day average)
+    - Close > 2% above 50 EMA
+    - RSI > 55
+    - Both 20 & 50 EMAs rising (bullish momentum)
+    
+    Buy (less convincing):
+    - Crossover 4-7 days old
+    - Price > 50 EMA (200 EMA optional)
+    - Volume > 1.5x (20-day average)
+    - Close > 1% above 50 EMA
+    - RSI > 45
+    - At least 20 EMA rising
+    """
+    if len(daily_df) < 50:
+        return None
+    
+    try:
+        latest = daily_df.iloc[-1]
+        
+        # Get EMA and RSI values from Supabase (pre-calculated)
+        ema_20 = latest.get('ema_20')
+        ema_50 = latest.get('ema_50')
+        ema_200 = latest.get('ema_200')
+        rsi_14 = latest.get('rsi_14')
+        
+        # Check if required data exists
+        if pd.isna(ema_20) or pd.isna(ema_50) or pd.isna(rsi_14):
+            return None
+        
+        # Find the crossover day (last 7 days)
+        crossover_day = None
+        days_since_crossover = None
+        
+        for i in range(1, min(8, len(daily_df))):
+            prev_day = daily_df.iloc[-(i+1)]
+            curr_day = daily_df.iloc[-i]
+            
+            prev_ema_20 = prev_day.get('ema_20')
+            prev_ema_50 = prev_day.get('ema_50')
+            curr_ema_20 = curr_day.get('ema_20')
+            curr_ema_50 = curr_day.get('ema_50')
+            
+            # Skip if data missing
+            if pd.isna(prev_ema_20) or pd.isna(prev_ema_50) or pd.isna(curr_ema_20) or pd.isna(curr_ema_50):
+                continue
+            
+            # Check for crossover: previous day 20 <= 50, current day 20 > 50
+            if prev_ema_20 <= prev_ema_50 and curr_ema_20 > curr_ema_50:
+                crossover_day = i
+                days_since_crossover = i
+                break
+        
+        # No crossover found in last 7 days
+        if crossover_day is None:
+            return None
+        
+        # Basic filters that apply to both Buy and Strong Buy
+        # Price must be above 50 EMA
+        if current_price <= ema_50:
+            return None
+        
+        # Calculate metrics
+        pct_above_50_ema = ((current_price - ema_50) / ema_50) * 100
+        
+        # Volume check
+        avg_volume = daily_df['volume'].tail(20).mean()
+        current_volume = latest['volume']
+        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
+        
+        # Check if EMAs are rising (bullish momentum)
+        ema_20_5d_ago = daily_df.iloc[-6].get('ema_20') if len(daily_df) >= 6 else None
+        ema_50_10d_ago = daily_df.iloc[-11].get('ema_50') if len(daily_df) >= 11 else None
+        
+        ema_20_rising = ema_20 > ema_20_5d_ago if pd.notna(ema_20_5d_ago) else False
+        ema_50_rising = ema_50 > ema_50_10d_ago if pd.notna(ema_50_10d_ago) else False
+        
+        # Check position relative to 200 EMA
+        above_200_ema = current_price > ema_200 if pd.notna(ema_200) else False
+        
+        # Determine signal strength
+        # STRONG BUY criteria
+        if (days_since_crossover <= 3 and
+            above_200_ema and
+            volume_ratio > 2.0 and
+            pct_above_50_ema > 2.0 and
+            rsi_14 > 55 and
+            ema_20_rising and
+            ema_50_rising):
+            signal_strength = 'strong'
+            signal_type = 'golden_cross_strong'
+        
+        # BUY criteria
+        elif (days_since_crossover <= 7 and
+              volume_ratio > 1.5 and
+              pct_above_50_ema > 1.0 and
+              rsi_14 > 45 and
+              ema_20_rising):
+            signal_strength = 'regular'
+            signal_type = 'golden_cross_buy'
+        
+        else:
+            return None
+        
+        return {
+            'signal_type': signal_type,
+            'signal_strength': signal_strength,
+            'days_since_crossover': days_since_crossover,
+            'pct_above_50_ema': round(pct_above_50_ema, 2),
+            'above_200_ema': above_200_ema,
+            'volume_ratio': round(volume_ratio, 2),
+            'rsi_14': round(rsi_14, 2),
+            'ema_20_rising': ema_20_rising,
+            'ema_50_rising': ema_50_rising,
+            'ema_20': round(ema_20, 2),
+            'ema_50': round(ema_50, 2),
+            'ema_200': round(ema_200, 2) if pd.notna(ema_200) else None
+        }
+        
+    except Exception as e:
+        return None
+
 def check_200_ema_retest(daily_df: pd.DataFrame, current_price: float) -> Optional[Dict]:
     """
     Check for 200 EMA Power Retest signal
@@ -437,6 +566,14 @@ def scan_stock(supabase: Client, ticker: str) -> List[Dict]:
             blue_zone_signal['price'] = round(current_price, 2)
             signals.append(blue_zone_signal)
         
+        # Check Golden Cross
+        golden_cross_signal = check_golden_cross(daily_df, current_price)
+        if golden_cross_signal:
+            golden_cross_signal['ticker'] = ticker
+            golden_cross_signal['stock_name'] = stock_name
+            golden_cross_signal['price'] = round(current_price, 2)
+            signals.append(golden_cross_signal)
+        
         # Check 200 EMA Retest
         ema_signal = check_200_ema_retest(daily_df, current_price)
         if ema_signal:
@@ -525,6 +662,8 @@ def scan_all_stocks(supabase: Client, tickers: List[str]) -> Dict:
         'narrow_cpr': 0,
         'blue_zone_strong': 0,
         'blue_zone_buy': 0,
+        'golden_cross_strong': 0,
+        'golden_cross_buy': 0,
         '200_ema_retest': 0,
         'multiple_signals': 0,
         'failed': 0
@@ -544,6 +683,8 @@ def scan_all_stocks(supabase: Client, tickers: List[str]) -> Dict:
                 print(f"  Signals found: CPR={stats['narrow_cpr']}, "
                       f"Blue Zone Strong={stats['blue_zone_strong']}, "
                       f"Blue Zone Buy={stats['blue_zone_buy']}, "
+                      f"Golden Cross Strong={stats['golden_cross_strong']}, "
+                      f"Golden Cross Buy={stats['golden_cross_buy']}, "
                       f"200 EMA={stats['200_ema_retest']}")
             
             # Scan stock
@@ -562,6 +703,10 @@ def scan_all_stocks(supabase: Client, tickers: List[str]) -> Dict:
                         stats['blue_zone_strong'] += 1
                     elif signal_type == 'blue_zone_buy':
                         stats['blue_zone_buy'] += 1
+                    elif signal_type == 'golden_cross_strong':
+                        stats['golden_cross_strong'] += 1
+                    elif signal_type == 'golden_cross_buy':
+                        stats['golden_cross_buy'] += 1
                     elif signal_type == '200_ema_retest':
                         stats['200_ema_retest'] += 1
                 
@@ -690,6 +835,8 @@ def main():
     print(f"  📍 Narrow CPR Breakaway: {stats['narrow_cpr']}")
     print(f"  🟢 Blue Zone Strong Buy: {stats['blue_zone_strong']}")
     print(f"  🟢 Blue Zone Buy: {stats['blue_zone_buy']}")
+    print(f"  ⚡ Golden Cross Strong Buy: {stats['golden_cross_strong']}")
+    print(f"  ⚡ Golden Cross Buy: {stats['golden_cross_buy']}")
     print(f"  📈 200 EMA Retest: {stats['200_ema_retest']}")
     print(f"  🔥 Stocks with multiple signals: {stats['multiple_signals']}")
     
