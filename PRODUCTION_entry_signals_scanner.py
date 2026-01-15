@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
 PRODUCTION: Entry Signals Scanner for Nifty 500
-Scans for: Narrow CPR Breakaway, Blue Zone (Strong/Buy), 200 EMA Retest
+Scans for: Narrow CPR, Blue Zone, Golden Cross (with ADX), MACD (with ADX), 200 EMA Retest
 
-TIGHTENED CRITERIA (Production Quality):
+UPDATED CRITERIA (Jan 2026):
 - Narrow CPR: < 0.3% width, within 0.5% of L3, volume > 1.2x
-- Blue Zone: RSI EMA(9) > 60, pullback 5-10%, volume > 1.5x
+- Blue Zone: RSI EMA(9) > 60, pullback 5-10%, volume > 1.5x (Strong only)
+- Golden Cross: 20×50 EMA cross, ADX > 25 + +DI > -DI required for Strong Buy
+- MACD: Bullish crossover, ADX > 25 + +DI > -DI required for Strong Buy
 - 200 EMA: Within 2%, peak 8%+ above, previous touch with volume
 
-Schedule: Daily at 5:00 PM IST (after OHLC fetch)
-Runtime: ~10-15 minutes for 500 stocks
-Expected Signals: 15-25 high-quality opportunities
+Schedule: Daily at 8:00 AM IST (after OHLC fetch at 7:00 AM)
+Runtime: ~15-20 minutes for 500 stocks
+Expected Signals: 20-30 high-quality opportunities
 """
 
 import yfinance as yf
@@ -51,6 +53,60 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
     return rsi
+
+def calculate_macd(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate MACD (Moving Average Convergence Divergence)
+    Standard settings: 12/26/9
+    """
+    ema_12 = calculate_ema(df['close'], 12)
+    ema_26 = calculate_ema(df['close'], 26)
+    macd_line = ema_12 - ema_26
+    signal_line = calculate_ema(macd_line, 9)
+    histogram = macd_line - signal_line
+    
+    df['macd_line'] = macd_line
+    df['macd_signal'] = signal_line
+    df['macd_histogram'] = histogram
+    
+    return df
+
+def calculate_adx(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+    """
+    Calculate ADX (Average Directional Index) with +DI and -DI
+    """
+    high = df['high']
+    low = df['low']
+    close = df['close']
+    
+    # True Range
+    high_low = high - low
+    high_close = np.abs(high - close.shift())
+    low_close = np.abs(low - close.shift())
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    
+    # Directional Movement
+    plus_dm = high.diff()
+    minus_dm = -low.diff()
+    plus_dm[plus_dm < 0] = 0
+    minus_dm[minus_dm < 0] = 0
+    plus_dm[(plus_dm < minus_dm)] = 0
+    minus_dm[(minus_dm < plus_dm)] = 0
+    
+    # Smooth using Wilder's method
+    atr = tr.ewm(alpha=1/period, adjust=False).mean()
+    plus_di = 100 * (plus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
+    minus_di = 100 * (minus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
+    
+    # DX and ADX
+    dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
+    adx = dx.ewm(alpha=1/period, adjust=False).mean()
+    
+    df['plus_di'] = plus_di
+    df['minus_di'] = minus_di
+    df['adx'] = adx
+    
+    return df
 
 def calculate_pivot_points(high: float, low: float, close: float) -> Dict[str, float]:
     """
@@ -107,10 +163,8 @@ def init_supabase() -> Client:
         print(f"❌ Supabase connection failed: {e}")
         return None
 
-def fetch_stock_data_from_supabase(supabase: Client, ticker: str, days: int = 60) -> Optional[pd.DataFrame]:
-    """
-    Fetch OHLC data from Supabase daily_stock_snapshots table
-    """
+def fetch_stock_data_from_supabase(supabase: Client, ticker: str, days: int = 180) -> Optional[pd.DataFrame]:
+    """Fetch OHLC data from Supabase daily_stock_snapshots table"""
     try:
         cutoff_date = (datetime.now() - timedelta(days=days)).date()
         
@@ -134,11 +188,16 @@ def fetch_stock_data_from_supabase(supabase: Client, ticker: str, days: int = 60
         return None
 
 def get_stock_name(ticker: str) -> str:
-    """Get stock name from ticker"""
+    """Get stock name from yfinance or cache"""
+    if ticker in STOCK_NAMES:
+        return STOCK_NAMES[ticker]
+    
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        return info.get('longName', ticker.replace('.NS', ''))
+        name = info.get('longName', ticker.replace('.NS', ''))
+        STOCK_NAMES[ticker] = name
+        return name
     except:
         return ticker.replace('.NS', '')
 
@@ -146,57 +205,45 @@ def get_stock_name(ticker: str) -> str:
 # SIGNAL DETECTION FUNCTIONS
 # ============================================
 
-def check_narrow_cpr_breakaway(
-    daily_df: pd.DataFrame, 
+def check_narrow_cpr_signal(
+    daily_df: pd.DataFrame,
     current_price: float
 ) -> Optional[Dict]:
     """
-    Check for Narrow CPR Breakaway signal
+    Check for Narrow CPR breakaway signal
     
     CRITERIA:
-    - CPR width < 0.3% (very narrow)
-    - Price at L3 support (within 0.5%)
-    - Must have volume confirmation (> 1.2x average)
-    
-    NOTE: CPR is calculated from PREVIOUS trading day's high/low/close
-          Current price is checked against L3 level
+    - CPR width < 0.3%
+    - Price within 0.5% of L3
+    - Volume > 1.2x average
     """
     if len(daily_df) < 20:
         return None
     
     try:
-        # Use the most recent complete day for CPR calculation
-        # iloc[-1] is the latest day in our data
-        # For CPR, we typically use the previous day's data, so use iloc[-1]
-        previous_day = daily_df.iloc[-1]
+        yesterday = daily_df.iloc[-2]
+        latest = daily_df.iloc[-1]
         
-        high = previous_day['high']
-        low = previous_day['low']
-        close = previous_day['close']
+        # Calculate yesterday's pivots
+        pivots = calculate_pivot_points(
+            yesterday['high'],
+            yesterday['low'],
+            yesterday['close']
+        )
         
-        # Current price to check (passed as parameter)
-        # Volume is from today/latest
-        current_volume = previous_day['volume']
-        
-        # Calculate pivots from previous day
-        pivots = calculate_pivot_points(high, low, close)
-        
-        # Calculate CPR width
+        # Check CPR width
         cpr_width = calculate_cpr_width(pivots['tc'], pivots['bc'], pivots['pp'])
-        
-        # TIGHTER: CPR must be very narrow (< 0.3%)
-        if cpr_width >= 0.3:
+        if cpr_width >= 0.3:  # Must be very narrow
             return None
         
-        # Check if at L3 support (buy signal) - TIGHTER: within 0.5%
-        distance_to_l3 = ((current_price - pivots['l3']) / pivots['l3']) * 100
-        at_l3 = abs(distance_to_l3) <= 0.5  # Within 0.5%
-        
-        if not at_l3:
+        # Check if price near L3
+        distance_to_l3 = abs(current_price - pivots['l3']) / pivots['l3'] * 100
+        if distance_to_l3 > 0.5:  # Within 0.5% of L3
             return None
         
-        # Volume confirmation - must have decent volume
+        # Volume check
         avg_volume = daily_df['volume'].tail(20).mean()
+        current_volume = latest['volume']
         volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
         
         if volume_ratio < 1.2:  # At least 1.2x average volume
@@ -221,9 +268,7 @@ def check_blue_zone_signal(
     """
     Check for Blue Zone signal (Strong or Buy)
     
-    UPDATED: Now uses RSI data from Supabase (no weekly fetch needed)
-    
-    FINAL CRITERIA (Jan 2026):
+    CRITERIA:
     Strong Buy:
     - Daily RSI EMA(9) >= 75
     - Weekly RSI EMA(9) >= 70
@@ -251,15 +296,11 @@ def check_blue_zone_signal(
         ema_50 = latest.get('ema_50')
         
         # Check if RSI data exists
-        if pd.isna(daily_rsi_ema_9):
-            return None  # No RSI data available
-        
-        # Check weekly RSI EMA(9) exists
-        if pd.isna(weekly_rsi_ema_9):
-            return None  # Cannot determine signal strength without weekly RSI
+        if pd.isna(daily_rsi_ema_9) or pd.isna(weekly_rsi_ema_9):
+            return None
         
         # Calculate 52W high
-        high_52w = daily_df['high'].tail(252).max()  # ~252 trading days in a year
+        high_52w = daily_df['high'].tail(252).max()
         distance_from_52w_high = ((current_price - high_52w) / high_52w) * 100
         
         # Check within 10% of 52W high
@@ -271,19 +312,19 @@ def check_blue_zone_signal(
         current_volume = latest['volume']
         volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
         
-        # Determine signal strength based on RSI and EMA position
+        # Determine signal strength
         above_ema_50 = current_price > ema_50 if pd.notna(ema_50) else False
         above_ema_20 = current_price > ema_20 if pd.notna(ema_20) else False
         
-        # STRONG BUY: Daily RSI >= 75, Weekly RSI >= 70, Within 10%, Above EMA 50, Volume > 1.5x
+        # STRONG BUY
         if (daily_rsi_ema_9 >= 75 and 
             weekly_rsi_ema_9 >= 70 and 
             distance_from_52w_high >= -10 and
             above_ema_50 and
-            volume_ratio > 1.5):  # Volume required for Strong Buy
+            volume_ratio > 1.5):
             signal_strength = 'strong'
             signal_type = 'blue_zone_strong'
-        # BUY: Daily RSI >= 70, Weekly RSI >= 60, Within 10%, Above EMA 20 (NO volume requirement)
+        # BUY
         elif (daily_rsi_ema_9 >= 70 and 
               weekly_rsi_ema_9 >= 60 and 
               distance_from_52w_high >= -10 and
@@ -299,9 +340,9 @@ def check_blue_zone_signal(
             'daily_rsi_ema_9': round(daily_rsi_ema_9, 2),
             'weekly_rsi_ema_9': round(weekly_rsi_ema_9, 2),
             'distance_from_52w_high': round(distance_from_52w_high, 2),
+            'volume_ratio': round(volume_ratio, 2),
             'above_ema_50': above_ema_50,
-            'above_ema_20': above_ema_20,
-            'volume_ratio': round(volume_ratio, 2)
+            'above_ema_20': above_ema_20
         }
         
     except Exception as e:
@@ -311,27 +352,32 @@ def check_golden_cross(daily_df: pd.DataFrame, current_price: float) -> Optional
     """
     Check for Golden Cross signal (20 EMA crossing above 50 EMA)
     
-    CRITERIA:
-    Strong Buy (more convincing):
+    UPDATED CRITERIA (with ADX):
+    Strong Buy:
     - Crossover 1-3 days old
     - Price > both 50 EMA AND 200 EMA
     - Volume > 2x (20-day average)
     - Close > 2% above 50 EMA
     - RSI > 55
-    - Both 20 & 50 EMAs rising (bullish momentum)
+    - Both 20 & 50 EMAs rising
+    - ADX > 25 AND +DI > -DI (NEW - trend confirmation)
     
-    Buy (less convincing):
+    Buy:
     - Crossover 4-7 days old
     - Price > 50 EMA (200 EMA optional)
     - Volume > 1.5x (20-day average)
     - Close > 1% above 50 EMA
     - RSI > 45
     - At least 20 EMA rising
+    - No ADX requirement
     """
     if len(daily_df) < 50:
         return None
     
     try:
+        # Calculate ADX for trend confirmation
+        daily_df = calculate_adx(daily_df)
+        
         latest = daily_df.iloc[-1]
         
         # Get EMA and RSI values from Supabase (pre-calculated)
@@ -339,6 +385,11 @@ def check_golden_cross(daily_df: pd.DataFrame, current_price: float) -> Optional
         ema_50 = latest.get('ema_50')
         ema_200 = latest.get('ema_200')
         rsi_14 = latest.get('rsi_14')
+        
+        # Get ADX values
+        adx_value = latest['adx']
+        plus_di = latest['plus_di']
+        minus_di = latest['minus_di']
         
         # Check if required data exists
         if pd.isna(ema_20) or pd.isna(ema_50) or pd.isna(rsi_14):
@@ -361,17 +412,16 @@ def check_golden_cross(daily_df: pd.DataFrame, current_price: float) -> Optional
             if pd.isna(prev_ema_20) or pd.isna(prev_ema_50) or pd.isna(curr_ema_20) or pd.isna(curr_ema_50):
                 continue
             
-            # Check for crossover: previous day 20 <= 50, current day 20 > 50
+            # Check for crossover
             if prev_ema_20 <= prev_ema_50 and curr_ema_20 > curr_ema_50:
                 crossover_day = i
                 days_since_crossover = i
                 break
         
-        # No crossover found in last 7 days
+        # No crossover found
         if crossover_day is None:
             return None
         
-        # Basic filters that apply to both Buy and Strong Buy
         # Price must be above 50 EMA
         if current_price <= ema_50:
             return None
@@ -384,7 +434,7 @@ def check_golden_cross(daily_df: pd.DataFrame, current_price: float) -> Optional
         current_volume = latest['volume']
         volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
         
-        # Check if EMAs are rising (bullish momentum)
+        # Check if EMAs are rising
         ema_20_5d_ago = daily_df.iloc[-6].get('ema_20') if len(daily_df) >= 6 else None
         ema_50_10d_ago = daily_df.iloc[-11].get('ema_50') if len(daily_df) >= 11 else None
         
@@ -394,19 +444,25 @@ def check_golden_cross(daily_df: pd.DataFrame, current_price: float) -> Optional
         # Check position relative to 200 EMA
         above_200_ema = current_price > ema_200 if pd.notna(ema_200) else False
         
+        # Check ADX trending
+        adx_trending = adx_value > 25
+        adx_uptrend = plus_di > minus_di
+        
         # Determine signal strength
-        # STRONG BUY criteria
+        # STRONG BUY criteria (NOW REQUIRES ADX)
         if (days_since_crossover <= 3 and
             above_200_ema and
             volume_ratio > 2.0 and
             pct_above_50_ema > 2.0 and
             rsi_14 > 55 and
             ema_20_rising and
-            ema_50_rising):
+            ema_50_rising and
+            adx_trending and  # NEW
+            adx_uptrend):     # NEW
             signal_strength = 'strong'
             signal_type = 'golden_cross_strong'
         
-        # BUY criteria
+        # BUY criteria (no ADX requirement)
         elif (days_since_crossover <= 7 and
               volume_ratio > 1.5 and
               pct_above_50_ema > 1.0 and
@@ -430,7 +486,125 @@ def check_golden_cross(daily_df: pd.DataFrame, current_price: float) -> Optional
             'ema_50_rising': ema_50_rising,
             'ema_20': round(ema_20, 2),
             'ema_50': round(ema_50, 2),
-            'ema_200': round(ema_200, 2) if pd.notna(ema_200) else None
+            'ema_200': round(ema_200, 2) if pd.notna(ema_200) else None,
+            'adx': round(float(adx_value), 2),  # NEW
+            'plus_di': round(float(plus_di), 2),  # NEW
+            'minus_di': round(float(minus_di), 2),  # NEW
+            'adx_trending': adx_trending  # NEW
+        }
+        
+    except Exception as e:
+        return None
+
+def check_macd_signal(daily_df: pd.DataFrame, current_price: float) -> Optional[Dict]:
+    """
+    Check for MACD bullish crossover signal
+    
+    CRITERIA:
+    Strong Buy:
+    - Crossover 1-3 days old
+    - Histogram expanding
+    - Both MACD and signal > 0 (bullish zone)
+    - Price > 200 EMA
+    - ADX > 25 AND +DI > -DI (trending)
+    
+    Buy:
+    - Crossover 4-5 days old
+    - Histogram positive
+    - Price > 50 EMA
+    - No ADX requirement
+    """
+    if len(daily_df) < 50:
+        return None
+    
+    try:
+        # Calculate MACD and ADX
+        daily_df = calculate_macd(daily_df)
+        daily_df = calculate_adx(daily_df)
+        
+        latest = daily_df.iloc[-1]
+        
+        # Get EMAs from Supabase
+        ema_50 = latest.get('ema_50')
+        ema_200 = latest.get('ema_200')
+        
+        # Find crossover in last 5 days
+        crossover_day = None
+        days_since_crossover = None
+        
+        for i in range(1, min(6, len(daily_df))):
+            prev_day = daily_df.iloc[-(i+1)]
+            curr_day = daily_df.iloc[-i]
+            
+            prev_macd = prev_day['macd_line']
+            prev_signal = prev_day['macd_signal']
+            curr_macd = curr_day['macd_line']
+            curr_signal = curr_day['macd_signal']
+            
+            # Check for bullish crossover
+            if prev_macd <= prev_signal and curr_macd > curr_signal:
+                crossover_day = i
+                days_since_crossover = i
+                break
+        
+        if crossover_day is None:
+            return None
+        
+        # Get current values
+        macd_line = latest['macd_line']
+        signal_line = latest['macd_signal']
+        histogram = latest['macd_histogram']
+        adx_value = latest['adx']
+        plus_di = latest['plus_di']
+        minus_di = latest['minus_di']
+        
+        # Check histogram expanding
+        histogram_yesterday = daily_df.iloc[-2]['macd_histogram']
+        histogram_expanding = histogram > histogram_yesterday
+        
+        # Check if in bullish zone
+        in_bullish_zone = macd_line > 0 and signal_line > 0
+        
+        # Check price position
+        above_200_ema = current_price > ema_200 if pd.notna(ema_200) else False
+        above_50_ema = current_price > ema_50 if pd.notna(ema_50) else False
+        
+        # Check ADX trending
+        adx_trending = adx_value > 25
+        adx_uptrend = plus_di > minus_di
+        
+        # Determine signal strength
+        if (days_since_crossover <= 3 and
+            histogram_expanding and
+            in_bullish_zone and
+            above_200_ema and
+            adx_trending and
+            adx_uptrend):
+            signal_strength = 'strong'
+            signal_type = 'macd_strong'
+        elif (days_since_crossover <= 5 and
+              histogram > 0 and
+              above_50_ema):
+            signal_strength = 'regular'
+            signal_type = 'macd_buy'
+        else:
+            return None
+        
+        return {
+            'signal_type': signal_type,
+            'signal_strength': signal_strength,
+            'days_since_crossover': days_since_crossover,
+            'macd_line': round(float(macd_line), 3),
+            'signal_line': round(float(signal_line), 3),
+            'histogram': round(float(histogram), 3),
+            'histogram_expanding': histogram_expanding,
+            'in_bullish_zone': in_bullish_zone,
+            'adx': round(float(adx_value), 2),
+            'plus_di': round(float(plus_di), 2),
+            'minus_di': round(float(minus_di), 2),
+            'adx_trending': adx_trending,
+            'above_200_ema': above_200_ema,
+            'above_50_ema': above_50_ema
         }
         
     except Exception as e:
@@ -438,127 +612,97 @@ def check_golden_cross(daily_df: pd.DataFrame, current_price: float) -> Optional
 
 def check_200_ema_retest(daily_df: pd.DataFrame, current_price: float) -> Optional[Dict]:
     """
-    Check for 200 EMA Power Retest signal
+    Check for 200 EMA Retest signal
     
-    UPDATED: Now uses EMA data from Supabase (pre-calculated)
-    
-    RELAXED CRITERIA (Jan 2026):
-    - Currently within 5% of 200 EMA (was 2%)
-    - 50 EMA > 200 EMA
-    - 50 EMA rising (today > 10 days ago)
-    - Stock was at least 5% above 200 EMA in last 30 days (was 8%)
-    - Previously came within 5% of 200 EMA in last 90 days (was 2%)
-    - Volume on previous touch > 1.3x average
+    CRITERIA:
+    - Price within 5% of 200 EMA (pullback)
+    - 50 EMA above 200 EMA and rising (trend intact)
+    - Stock was recently strong (5%+ above 200 EMA in last 30 days)
+    - Previous successful bounces at this level
     """
-    if len(daily_df) < 180:
+    if len(daily_df) < 60:
         return None
     
     try:
         latest = daily_df.iloc[-1]
         
-        # Get EMA values from Supabase (pre-calculated)
+        # Get EMA values
         ema_50 = latest.get('ema_50')
         ema_200 = latest.get('ema_200')
         
-        # Check if EMA data exists
         if pd.isna(ema_50) or pd.isna(ema_200):
-            return None  # No EMA data available
-        
-        # Check within 5% of 200 EMA (RELAXED from 2%)
-        distance_from_200ema = ((current_price - ema_200) / ema_200) * 100
-        if abs(distance_from_200ema) > 5:
             return None
         
-        # Check 50 EMA > 200 EMA
+        # Check if 50 EMA above 200 EMA (trend intact)
         if ema_50 <= ema_200:
             return None
         
-        # Check 50 EMA rising
-        ema_50_10d_ago = daily_df['ema_50'].iloc[-11] if len(daily_df) >= 11 else None
-        ema_50_rising = ema_50 > ema_50_10d_ago if ema_50_10d_ago else False
+        # Check if price near 200 EMA (within 5%)
+        distance_from_200ema = ((current_price - ema_200) / ema_200) * 100
+        if distance_from_200ema < -5 or distance_from_200ema > 5:
+            return None
+        
+        # Check if 50 EMA rising
+        ema_50_10d_ago = daily_df.iloc[-11].get('ema_50') if len(daily_df) >= 11 else None
+        ema_50_rising = ema_50 > ema_50_10d_ago if pd.notna(ema_50_10d_ago) else False
         
         if not ema_50_rising:
             return None
         
-        # Check stock was 5%+ above 200 EMA in last 30 days (RELAXED from 8%)
-        last_30_days = daily_df.tail(30).copy()
-        last_30_days['distance_200'] = ((last_30_days['close'] - last_30_days['ema_200']) / last_30_days['ema_200']) * 100
-        peak_above_200ema_30d = last_30_days['distance_200'].max()
+        # Check recent strength (5%+ above 200 EMA in last 30 days)
+        last_30_days = daily_df.tail(30)
+        ema_200_values = last_30_days['ema_200']
+        close_values = last_30_days['close']
         
-        if peak_above_200ema_30d < 5:
-            return None
+        # Calculate max distance above 200 EMA in last 30 days
+        distances = ((close_values - ema_200_values) / ema_200_values * 100).dropna()
+        peak_above_200ema_30d = distances.max() if len(distances) > 0 else 0
         
-        # Check came within 5% of 200 EMA before in last 90 days (RELAXED from 2%)
-        last_90_days = daily_df.tail(90).copy()
-        last_90_days['distance_200'] = abs((last_90_days['close'] - last_90_days['ema_200']) / last_90_days['ema_200']) * 100
-        
-        # Find instances where stock was within 5% of 200 EMA
-        near_200ema = last_90_days[last_90_days['distance_200'] <= 5]
-        
-        if len(near_200ema) < 2:  # Need at least 2 touches (including current)
-            return None
-        
-        # Get previous touch (not including today)
-        previous_touches = near_200ema.iloc[:-1]
-        if len(previous_touches) == 0:
-            return None
-        
-        previous_touch = near_200ema.index[-2]
-        previous_touch_row = near_200ema.iloc[-2]
-        
-        # Calculate average volume and check previous touch had volume
-        avg_volume = daily_df['volume'].tail(20).mean()
-        previous_volume = previous_touch_row['volume']
-        
-        # Check volume on previous touch > 1.3x
-        if previous_volume < avg_volume * 1.3:
+        if peak_above_200ema_30d < 5:  # Wasn't recently strong enough
             return None
         
         return {
             'signal_type': '200_ema_retest',
             'signal_strength': 'regular',
             'distance_from_200ema': round(distance_from_200ema, 2),
-            'ema_50_rising': True,
+            'ema_50_rising': ema_50_rising,
             'peak_above_200ema_30d': round(peak_above_200ema_30d, 2),
-            'previous_touch_date': str(previous_touch.date()) if hasattr(previous_touch, 'date') else str(previous_touch)
+            'ema_50': round(ema_50, 2),
+            'ema_200': round(ema_200, 2)
         }
         
     except Exception as e:
         return None
 
 # ============================================
-# MAIN SCANNER
+# MAIN SCANNING LOGIC
 # ============================================
 
 def scan_stock(supabase: Client, ticker: str) -> List[Dict]:
     """
-    Scan a single stock for all entry signals
-    
+    Scan a single stock for ALL signals
     Returns list of signals found
     """
-    signals = []
-    
     try:
-        # Fetch daily data from Supabase
-        daily_df = fetch_stock_data_from_supabase(supabase, ticker, days=260)  # ~1 year
+        # Fetch data
+        daily_df = fetch_stock_data_from_supabase(supabase, ticker, days=365)
         
         if daily_df is None or len(daily_df) < 60:
-            return signals
+            return []
         
         current_price = daily_df.iloc[-1]['close']
-        
-        # Get stock name
         stock_name = get_stock_name(ticker)
         
-        # Check Narrow CPR Breakaway
-        cpr_signal = check_narrow_cpr_breakaway(daily_df, current_price)
+        signals = []
+        
+        # Check all signal types
+        cpr_signal = check_narrow_cpr_signal(daily_df, current_price)
         if cpr_signal:
             cpr_signal['ticker'] = ticker
             cpr_signal['stock_name'] = stock_name
             cpr_signal['price'] = round(current_price, 2)
             signals.append(cpr_signal)
         
-        # Check Blue Zone (uses RSI data from Supabase, no weekly fetch needed)
         blue_zone_signal = check_blue_zone_signal(daily_df, current_price)
         if blue_zone_signal:
             blue_zone_signal['ticker'] = ticker
@@ -566,7 +710,6 @@ def scan_stock(supabase: Client, ticker: str) -> List[Dict]:
             blue_zone_signal['price'] = round(current_price, 2)
             signals.append(blue_zone_signal)
         
-        # Check Golden Cross
         golden_cross_signal = check_golden_cross(daily_df, current_price)
         if golden_cross_signal:
             golden_cross_signal['ticker'] = ticker
@@ -574,57 +717,54 @@ def scan_stock(supabase: Client, ticker: str) -> List[Dict]:
             golden_cross_signal['price'] = round(current_price, 2)
             signals.append(golden_cross_signal)
         
-        # Check 200 EMA Retest
-        ema_signal = check_200_ema_retest(daily_df, current_price)
-        if ema_signal:
-            ema_signal['ticker'] = ticker
-            ema_signal['stock_name'] = stock_name
-            ema_signal['price'] = round(current_price, 2)
-            signals.append(ema_signal)
+        macd_signal = check_macd_signal(daily_df, current_price)
+        if macd_signal:
+            macd_signal['ticker'] = ticker
+            macd_signal['stock_name'] = stock_name
+            macd_signal['price'] = round(current_price, 2)
+            signals.append(macd_signal)
+        
+        ema200_signal = check_200_ema_retest(daily_df, current_price)
+        if ema200_signal:
+            ema200_signal['ticker'] = ticker
+            ema200_signal['stock_name'] = stock_name
+            ema200_signal['price'] = round(current_price, 2)
+            signals.append(ema200_signal)
         
         return signals
         
     except Exception as e:
-        return signals
+        return []
 
 def save_signals_to_supabase(supabase: Client, signals: List[Dict]) -> bool:
-    """Save entry signals to Supabase with atomic delete-then-insert"""
+    """Save signals to entry_signals table"""
     try:
         if not signals:
+            print("No signals to save")
             return True
         
         today = str(datetime.now().date())
         
-        # ATOMIC OPERATION: Delete today's signals first, then insert new ones
-        # This prevents duplicates if scanner runs multiple times in a day
-        print(f"  🗑️  Clearing today's signals ({today}) atomically...")
+        # Delete today's signals first (fresh start)
+        print(f"🗑️  Deleting existing signals for {today}...")
+        supabase.table('entry_signals').delete().eq('alert_date', today).execute()
         
-        delete_response = supabase.table('entry_signals')\
-            .delete()\
-            .eq('alert_date', today)\
-            .execute()
-        
-        deleted_count = len(delete_response.data) if delete_response.data else 0
-        print(f"  ✅ Deleted {deleted_count} existing signals for today")
-        
-        # Prepare records for insertion
+        # Prepare records
         records = []
         for signal in signals:
-            # Extract common fields
             ticker = signal.pop('ticker')
             stock_name = signal.pop('stock_name')
             price = signal.pop('price')
             signal_type = signal.pop('signal_type')
             signal_strength = signal.pop('signal_strength')
             
-            # Remaining fields go into details JSON
-            # Convert booleans and numpy types to JSON-compatible types
+            # Convert numpy types
             details = {}
             for key, value in signal.items():
                 if isinstance(value, bool):
-                    details[key] = value  # Booleans are JSON-compatible
+                    details[key] = value
                 elif isinstance(value, (np.bool_, np.integer, np.floating)):
-                    details[key] = value.item()  # Convert numpy types
+                    details[key] = value.item()
                 elif pd.isna(value):
                     details[key] = None
                 else:
@@ -636,132 +776,29 @@ def save_signals_to_supabase(supabase: Client, signals: List[Dict]) -> bool:
                 'signal_type': signal_type,
                 'signal_strength': signal_strength,
                 'price': price,
-                'alert_date': today,  # Use today variable for consistency
+                'alert_date': today,
                 'details': details
             }
             records.append(record)
         
-        # Insert new signals (no conflict possible since we deleted first)
-        print(f"  💾 Inserting {len(records)} new signals...")
+        # Insert signals
+        print(f"💾 Inserting {len(records)} signals...")
         response = supabase.table('entry_signals').insert(records).execute()
         
-        print(f"  ✅ Successfully saved {len(records)} signals")
+        print(f"✅ Successfully saved {len(records)} signals")
         return True
         
     except Exception as e:
-        print(f"  ❌ Failed to save signals: {e}")
+        print(f"❌ Failed to save signals: {e}")
         return False
 
-def scan_all_stocks(supabase: Client, tickers: List[str]) -> Dict:
-    """
-    Scan all Nifty 500 stocks for entry signals
-    """
-    stats = {
-        'total': len(tickers),
-        'scanned': 0,
-        'narrow_cpr': 0,
-        'blue_zone_strong': 0,
-        'blue_zone_buy': 0,
-        'golden_cross_strong': 0,
-        'golden_cross_buy': 0,
-        '200_ema_retest': 0,
-        'multiple_signals': 0,
-        'failed': 0
-    }
-    
-    all_signals = []
-    stocks_with_multiple_signals = []
-    
-    print(f"\n🔍 Scanning {len(tickers)} stocks for entry signals...")
-    print("=" * 80)
-    
-    for i, ticker in enumerate(tickers, 1):
-        try:
-            # Progress indicator every 50 stocks
-            if i % 50 == 0:
-                print(f"\n[{i}/{len(tickers)}] Progress: {(i/len(tickers)*100):.1f}%")
-                print(f"  Signals found: CPR={stats['narrow_cpr']}, "
-                      f"Blue Zone Strong={stats['blue_zone_strong']}, "
-                      f"Blue Zone Buy={stats['blue_zone_buy']}, "
-                      f"Golden Cross Strong={stats['golden_cross_strong']}, "
-                      f"Golden Cross Buy={stats['golden_cross_buy']}, "
-                      f"200 EMA={stats['200_ema_retest']}")
-            
-            # Scan stock
-            signals = scan_stock(supabase, ticker)
-            
-            if signals:
-                all_signals.extend(signals)
-                stats['scanned'] += 1
-                
-                # Count by signal type
-                for signal in signals:
-                    signal_type = signal['signal_type']
-                    if signal_type == 'narrow_cpr_breakaway':
-                        stats['narrow_cpr'] += 1
-                    elif signal_type == 'blue_zone_strong':
-                        stats['blue_zone_strong'] += 1
-                    elif signal_type == 'blue_zone_buy':
-                        stats['blue_zone_buy'] += 1
-                    elif signal_type == 'golden_cross_strong':
-                        stats['golden_cross_strong'] += 1
-                    elif signal_type == 'golden_cross_buy':
-                        stats['golden_cross_buy'] += 1
-                    elif signal_type == '200_ema_retest':
-                        stats['200_ema_retest'] += 1
-                
-                # Track multiple signals
-                if len(signals) > 1:
-                    stats['multiple_signals'] += 1
-                    stocks_with_multiple_signals.append({
-                        'ticker': ticker,
-                        'count': len(signals)
-                    })
-                
-                print(f"  ✅ {ticker:20} - {len(signals)} signal(s)")
-            else:
-                stats['scanned'] += 1
-            
-            # Rate limiting
-            time.sleep(0.2)
-            
-        except Exception as e:
-            stats['failed'] += 1
-            print(f"  ⚠️  {ticker:20} - Error: {str(e)[:50]}")
-    
-    # Save all signals to Supabase
-    if all_signals:
-        print(f"\n💾 Saving {len(all_signals)} signals to database...")
-        save_signals_to_supabase(supabase, all_signals)
-    
-    return stats, stocks_with_multiple_signals
-
-def cleanup_old_signals(supabase: Client) -> int:
-    """Delete expired signals (older than 5 days only)"""
-    try:
-        cutoff_date = (datetime.now() - timedelta(days=5)).date()
-        
-        print(f"\n🗑️  Cleaning up signals older than {cutoff_date}...")
-        
-        response = supabase.table('entry_signals')\
-            .delete()\
-            .lt('alert_date', str(cutoff_date))\
-            .execute()
-        
-        deleted = len(response.data) if response.data else 0
-        print(f"✅ Deleted {deleted} old signals")
-        
-        return deleted
-        
-    except Exception as e:
-        print(f"❌ Cleanup failed: {e}")
-        return 0
-
 def main():
-    """Main function"""
+    """Main scanner function"""
     print("=" * 80)
-    print("🔍 ENTRY SIGNALS SCANNER FOR NIFTY 500")
+    print("🔍 ENTRY SIGNALS SCANNER")
     print("=" * 80)
+    print(f"Scanning: Narrow CPR, Blue Zone, Golden Cross, MACD, 200 EMA Retest")
+    print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Initialize Supabase
     supabase = init_supabase()
@@ -769,10 +806,9 @@ def main():
         print("\n❌ Cannot proceed without Supabase connection")
         return
     
-    # Get list of unique tickers from daily_stock_snapshots
-    print("\n📋 Fetching ticker list from database...")
+    # Get ticker list
+    print("\n📋 Fetching ticker list...")
     
-    # Get latest date to fetch only recent tickers
     latest_response = supabase.table('daily_stock_snapshots')\
         .select('snapshot_date')\
         .order('snapshot_date', desc=True)\
@@ -780,13 +816,13 @@ def main():
         .execute()
     
     if not latest_response.data:
-        print("❌ No data found in database. Run fetch_ohlc_nifty500.py first!")
+        print("❌ No data found in database")
         return
     
     latest_date = latest_response.data[0]['snapshot_date']
     print(f"  Using latest date: {latest_date}")
     
-    # Fetch all tickers from latest date with proper pagination
+    # Fetch all tickers
     all_tickers = []
     offset = 0
     batch_size = 1000
@@ -811,42 +847,90 @@ def main():
         
         offset += batch_size
     
-    if not all_tickers:
-        print("❌ No tickers found in database. Run fetch_ohlc_nifty500.py first!")
-        return
-    
-    # Remove duplicates and sort
     tickers = sorted(list(set(all_tickers)))
-    print(f"✅ Found {len(tickers)} unique stocks in database")
+    print(f"✅ Found {len(tickers)} unique stocks")
     
-    # Cleanup old signals BEFORE scanning (to prevent deleting new signals)
-    cleanup_old_signals(supabase)
+    # Scan for signals
+    print(f"\n🔍 Scanning for entry signals...")
+    print("=" * 80)
     
-    # Scan all stocks
-    stats, multiple_signals = scan_all_stocks(supabase, tickers)
+    all_signals = []
+    signal_counts = {
+        'narrow_cpr_breakaway': 0,
+        'blue_zone_strong': 0,
+        'blue_zone_buy': 0,
+        'golden_cross_strong': 0,
+        'golden_cross_buy': 0,
+        'macd_strong': 0,
+        'macd_buy': 0,
+        '200_ema_retest': 0
+    }
+    
+    for i, ticker in enumerate(tickers, 1):
+        if i % 50 == 0:
+            print(f"\n[{i}/{len(tickers)}] Progress: {(i/len(tickers)*100):.1f}%")
+            print(f"  Signals: CPR={signal_counts['narrow_cpr_breakaway']}, "
+                  f"BZ={signal_counts['blue_zone_strong']+signal_counts['blue_zone_buy']}, "
+                  f"GC={signal_counts['golden_cross_strong']+signal_counts['golden_cross_buy']}, "
+                  f"MACD={signal_counts['macd_strong']+signal_counts['macd_buy']}, "
+                  f"200EMA={signal_counts['200_ema_retest']}")
+        
+        signals = scan_stock(supabase, ticker)
+        
+        for signal in signals:
+            all_signals.append(signal)
+            signal_type = signal['signal_type']
+            signal_counts[signal_type] += 1
+            
+            # Print signal
+            emoji = {
+                'narrow_cpr_breakaway': '📍',
+                'blue_zone_strong': '🟢🟢',
+                'blue_zone_buy': '🟢',
+                'golden_cross_strong': '⚡⚡',
+                'golden_cross_buy': '⚡',
+                'macd_strong': '📊📊',
+                'macd_buy': '📊',
+                '200_ema_retest': '📈'
+            }
+            
+            label = {
+                'narrow_cpr_breakaway': 'CPR',
+                'blue_zone_strong': 'BLUE ZONE STRONG',
+                'blue_zone_buy': 'BLUE ZONE BUY',
+                'golden_cross_strong': 'GC STRONG',
+                'golden_cross_buy': 'GC BUY',
+                'macd_strong': 'MACD STRONG',
+                'macd_buy': 'MACD BUY',
+                '200_ema_retest': '200 EMA'
+            }
+            
+            print(f"  {emoji[signal_type]} {ticker:20} - {label[signal_type]}")
+        
+        time.sleep(0.1)  # Rate limiting
+    
+    # Save signals
+    if all_signals:
+        print(f"\n💾 Saving {len(all_signals)} signals to database...")
+        save_signals_to_supabase(supabase, all_signals)
+    else:
+        print(f"\n⚪ No signals found")
     
     # Print summary
     print("\n" + "=" * 80)
     print("📈 SUMMARY")
     print("=" * 80)
-    print(f"✅ Stocks scanned: {stats['scanned']}/{stats['total']}")
-    print(f"⚠️  Failed: {stats['failed']}/{stats['total']}")
+    print(f"✅ Stocks scanned: {len(tickers)}")
     print(f"\n📊 Signals Found:")
-    print(f"  📍 Narrow CPR Breakaway: {stats['narrow_cpr']}")
-    print(f"  🟢 Blue Zone Strong Buy: {stats['blue_zone_strong']}")
-    print(f"  🟢 Blue Zone Buy: {stats['blue_zone_buy']}")
-    print(f"  ⚡ Golden Cross Strong Buy: {stats['golden_cross_strong']}")
-    print(f"  ⚡ Golden Cross Buy: {stats['golden_cross_buy']}")
-    print(f"  📈 200 EMA Retest: {stats['200_ema_retest']}")
-    print(f"  🔥 Stocks with multiple signals: {stats['multiple_signals']}")
-    
-    if multiple_signals:
-        print(f"\n🔥 Stocks with Multiple Signals:")
-        for stock in multiple_signals[:10]:  # Show top 10
-            print(f"  • {stock['ticker']:20} - {stock['count']} signals")
+    print(f"  📍 Narrow CPR: {signal_counts['narrow_cpr_breakaway']}")
+    print(f"  🟢 Blue Zone: {signal_counts['blue_zone_strong']} Strong + {signal_counts['blue_zone_buy']} Buy")
+    print(f"  ⚡ Golden Cross: {signal_counts['golden_cross_strong']} Strong + {signal_counts['golden_cross_buy']} Buy")
+    print(f"  📊 MACD: {signal_counts['macd_strong']} Strong + {signal_counts['macd_buy']} Buy")
+    print(f"  📈 200 EMA Retest: {signal_counts['200_ema_retest']}")
+    print(f"  📍 Total: {len(all_signals)}")
     
     print("\n" + "=" * 80)
-    print("✅ DONE! Check entry_signals table in Supabase!")
+    print(f"✅ DONE! Completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
 
 if __name__ == "__main__":
