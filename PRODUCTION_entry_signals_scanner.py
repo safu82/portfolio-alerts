@@ -614,11 +614,13 @@ def check_200_ema_retest(daily_df: pd.DataFrame, current_price: float) -> Option
     """
     Check for 200 EMA Retest signal
     
-    CRITERIA:
-    - Price within 5% of 200 EMA (pullback)
-    - 50 EMA above 200 EMA and rising (trend intact)
-    - Stock was recently strong (5%+ above 200 EMA in last 30 days)
-    - Previous successful bounces at this level
+    UPDATED CRITERIA (High Quality):
+    - Price within 2% of 200 EMA (close retest, not floating)
+    - Stock was 10%+ above 200 EMA in last 20 days (recent strong trend)
+    - 50 EMA > 3% above 200 EMA (clear trend separation - Minervini style)
+    - 50 EMA rising (momentum intact)
+    - Volume > 1.3x (bounce confirmation)
+    - RSI > 40 (orderly pullback, not panic)
     """
     if len(daily_df) < 60:
         return None
@@ -629,17 +631,23 @@ def check_200_ema_retest(daily_df: pd.DataFrame, current_price: float) -> Option
         # Get EMA values
         ema_50 = latest.get('ema_50')
         ema_200 = latest.get('ema_200')
+        rsi_14 = latest.get('rsi_14')
         
-        if pd.isna(ema_50) or pd.isna(ema_200):
+        if pd.isna(ema_50) or pd.isna(ema_200) or pd.isna(rsi_14):
             return None
         
         # Check if 50 EMA above 200 EMA (trend intact)
         if ema_50 <= ema_200:
             return None
         
-        # Check if price near 200 EMA (within 5%)
+        # NEW: Check 50 EMA > 3% above 200 EMA (clear trend separation)
+        ema_separation = ((ema_50 - ema_200) / ema_200) * 100
+        if ema_separation < 3.0:
+            return None
+        
+        # TIGHTENED: Check if price near 200 EMA (within 2%, was 5%)
         distance_from_200ema = ((current_price - ema_200) / ema_200) * 100
-        if distance_from_200ema < -5 or distance_from_200ema > 5:
+        if distance_from_200ema < -2 or distance_from_200ema > 2:
             return None
         
         # Check if 50 EMA rising
@@ -649,24 +657,39 @@ def check_200_ema_retest(daily_df: pd.DataFrame, current_price: float) -> Option
         if not ema_50_rising:
             return None
         
-        # Check recent strength (5%+ above 200 EMA in last 30 days)
-        last_30_days = daily_df.tail(30)
-        ema_200_values = last_30_days['ema_200']
-        close_values = last_30_days['close']
+        # TIGHTENED: Check recent strength (10%+ above 200 EMA in last 20 days, was 5% in 30 days)
+        last_20_days = daily_df.tail(20)
+        ema_200_values = last_20_days['ema_200']
+        close_values = last_20_days['close']
         
-        # Calculate max distance above 200 EMA in last 30 days
+        # Calculate max distance above 200 EMA in last 20 days
         distances = ((close_values - ema_200_values) / ema_200_values * 100).dropna()
-        peak_above_200ema_30d = distances.max() if len(distances) > 0 else 0
+        peak_above_200ema_20d = distances.max() if len(distances) > 0 else 0
         
-        if peak_above_200ema_30d < 5:  # Wasn't recently strong enough
+        if peak_above_200ema_20d < 10:  # Wasn't recently strong enough
+            return None
+        
+        # NEW: Volume confirmation (bounce with volume)
+        avg_volume = daily_df['volume'].tail(20).mean()
+        current_volume = latest['volume']
+        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
+        
+        if volume_ratio < 1.3:  # Need volume confirmation
+            return None
+        
+        # NEW: RSI check (orderly pullback, not panic)
+        if rsi_14 < 40:
             return None
         
         return {
             'signal_type': '200_ema_retest',
             'signal_strength': 'regular',
             'distance_from_200ema': round(distance_from_200ema, 2),
+            'ema_separation': round(ema_separation, 2),
             'ema_50_rising': ema_50_rising,
-            'peak_above_200ema_30d': round(peak_above_200ema_30d, 2),
+            'peak_above_200ema_20d': round(peak_above_200ema_20d, 2),
+            'volume_ratio': round(volume_ratio, 2),
+            'rsi_14': round(rsi_14, 2),
             'ema_50': round(ema_50, 2),
             'ema_200': round(ema_200, 2)
         }
