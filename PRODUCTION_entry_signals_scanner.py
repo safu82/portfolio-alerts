@@ -697,6 +697,142 @@ def check_200_ema_retest(daily_df: pd.DataFrame, current_price: float) -> Option
     except Exception as e:
         return None
 
+def check_200_ema_recovery_breakout(daily_df: pd.DataFrame, current_price: float) -> Optional[Dict]:
+    """
+    Check for 200 EMA Recovery Breakout signal (Stage 1 -> Stage 2 transition)
+    
+    Detects stocks breaking out AFTER consolidating below 200 EMA (Minervini-style base breakout)
+    
+    CRITERIA:
+    - Stock was below 200 EMA for 15-40 days (consolidation period)
+    - Stock was previously strong (10%+ above 200 EMA before consolidation)
+    - 50 EMA still above 200 EMA (trend not broken)
+    - Price closes above 200 EMA (breakout)
+    - Volume > 2x (strong breakout confirmation)
+    - ADX > 20 (trend forming)
+    - RSI > 50 (momentum positive)
+    - 50 EMA turning up (momentum building)
+    - Consolidation range < 10% (tight base, not wild swings)
+    """
+    if len(daily_df) < 60:
+        return None
+    
+    try:
+        latest = daily_df.iloc[-1]
+        
+        # Get EMA and indicator values
+        ema_50 = latest.get('ema_50')
+        ema_200 = latest.get('ema_200')
+        rsi_14 = latest.get('rsi_14')
+        
+        if pd.isna(ema_50) or pd.isna(ema_200) or pd.isna(rsi_14):
+            return None
+        
+        # Calculate ADX for trend confirmation
+        daily_df = calculate_adx(daily_df)
+        adx_value = latest['adx']
+        
+        # Check if price just crossed above 200 EMA (breakout day)
+        if current_price <= ema_200:
+            return None
+        
+        # Look back to find consolidation period below 200 EMA
+        days_below_200ema = 0
+        consolidation_start_idx = None
+        consolidation_highs = []
+        consolidation_lows = []
+        
+        # Count consecutive days below 200 EMA before today
+        for i in range(len(daily_df) - 2, max(0, len(daily_df) - 50), -1):
+            row = daily_df.iloc[i]
+            row_ema_200 = row.get('ema_200')
+            
+            if pd.isna(row_ema_200):
+                break
+            
+            if row['close'] < row_ema_200:
+                days_below_200ema += 1
+                consolidation_highs.append(row['high'])
+                consolidation_lows.append(row['low'])
+                if consolidation_start_idx is None:
+                    consolidation_start_idx = i
+            else:
+                break  # Stop when we hit a day above 200 EMA
+        
+        # Check if consolidation duration is in range (15-40 days)
+        if days_below_200ema < 15 or days_below_200ema > 40:
+            return None
+        
+        # Check consolidation range (must be tight, < 10%)
+        if consolidation_highs and consolidation_lows:
+            consolidation_range = ((max(consolidation_highs) - min(consolidation_lows)) / min(consolidation_lows)) * 100
+            if consolidation_range > 10:
+                return None  # Too wide, not a tight base
+        else:
+            return None
+        
+        # Check if 50 EMA still above 200 EMA (trend not broken during consolidation)
+        if ema_50 <= ema_200:
+            return None
+        
+        # Check if stock was previously strong (10%+ above 200 EMA before consolidation)
+        if consolidation_start_idx and consolidation_start_idx > 20:
+            pre_consolidation_days = daily_df.iloc[consolidation_start_idx - 20:consolidation_start_idx]
+            pre_consolidation_ema_200 = pre_consolidation_days['ema_200']
+            pre_consolidation_closes = pre_consolidation_days['close']
+            
+            distances_before = ((pre_consolidation_closes - pre_consolidation_ema_200) / pre_consolidation_ema_200 * 100).dropna()
+            peak_before_consolidation = distances_before.max() if len(distances_before) > 0 else 0
+            
+            if peak_before_consolidation < 10:
+                return None  # Wasn't strong enough before consolidation
+        else:
+            return None
+        
+        # Check if 50 EMA is turning up (momentum building)
+        ema_50_5d_ago = daily_df.iloc[-6].get('ema_50') if len(daily_df) >= 6 else None
+        ema_50_turning_up = ema_50 > ema_50_5d_ago if pd.notna(ema_50_5d_ago) else False
+        
+        if not ema_50_turning_up:
+            return None
+        
+        # Volume confirmation (strong breakout)
+        avg_volume = daily_df['volume'].tail(20).mean()
+        current_volume = latest['volume']
+        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
+        
+        if volume_ratio < 2.0:  # Need strong volume (2x, higher than retest)
+            return None
+        
+        # ADX check (trend forming)
+        if adx_value < 20:
+            return None
+        
+        # RSI check (positive momentum, not weak bounce)
+        if rsi_14 < 50:
+            return None
+        
+        # Calculate how close we are to breaking out (distance from 200 EMA on breakout day)
+        distance_from_200ema = ((current_price - ema_200) / ema_200) * 100
+        
+        return {
+            'signal_type': '200_ema_recovery',
+            'signal_strength': 'regular',
+            'days_consolidated': days_below_200ema,
+            'consolidation_range': round(consolidation_range, 2),
+            'peak_before_consolidation': round(peak_before_consolidation, 2),
+            'distance_from_200ema': round(distance_from_200ema, 2),
+            'volume_ratio': round(volume_ratio, 2),
+            'adx': round(float(adx_value), 2),
+            'rsi_14': round(rsi_14, 2),
+            'ema_50_turning_up': ema_50_turning_up,
+            'ema_50': round(ema_50, 2),
+            'ema_200': round(ema_200, 2)
+        }
+        
+    except Exception as e:
+        return None
+
 # ============================================
 # MAIN SCANNING LOGIC
 # ============================================
@@ -753,6 +889,15 @@ def scan_stock(supabase: Client, ticker: str) -> List[Dict]:
             ema200_signal['stock_name'] = stock_name
             ema200_signal['price'] = round(current_price, 2)
             signals.append(ema200_signal)
+        
+        # NEW: Check for 200 EMA Recovery Breakout (if retest didn't trigger)
+        if not ema200_signal:  # Only check recovery if retest didn't fire (avoid duplicate signals)
+            recovery_signal = check_200_ema_recovery_breakout(daily_df, current_price)
+            if recovery_signal:
+                recovery_signal['ticker'] = ticker
+                recovery_signal['stock_name'] = stock_name
+                recovery_signal['price'] = round(current_price, 2)
+                signals.append(recovery_signal)
         
         return signals
         
@@ -886,7 +1031,8 @@ def main():
         'golden_cross_buy': 0,
         'macd_strong': 0,
         'macd_buy': 0,
-        '200_ema_retest': 0
+        '200_ema_retest': 0,
+        '200_ema_recovery': 0
     }
     
     for i, ticker in enumerate(tickers, 1):
@@ -896,7 +1042,7 @@ def main():
                   f"BZ={signal_counts['blue_zone_strong']+signal_counts['blue_zone_buy']}, "
                   f"GC={signal_counts['golden_cross_strong']+signal_counts['golden_cross_buy']}, "
                   f"MACD={signal_counts['macd_strong']+signal_counts['macd_buy']}, "
-                  f"200EMA={signal_counts['200_ema_retest']}")
+                  f"200EMA={signal_counts['200_ema_retest']+signal_counts['200_ema_recovery']}")
         
         signals = scan_stock(supabase, ticker)
         
@@ -914,7 +1060,8 @@ def main():
                 'golden_cross_buy': '⚡',
                 'macd_strong': '📊📊',
                 'macd_buy': '📊',
-                '200_ema_retest': '📈'
+                '200_ema_retest': '📈',
+                '200_ema_recovery': '🚀'
             }
             
             label = {
@@ -925,7 +1072,8 @@ def main():
                 'golden_cross_buy': 'GC BUY',
                 'macd_strong': 'MACD STRONG',
                 'macd_buy': 'MACD BUY',
-                '200_ema_retest': '200 EMA'
+                '200_ema_retest': '200 EMA RETEST',
+                '200_ema_recovery': '200 EMA RECOVERY'
             }
             
             print(f"  {emoji[signal_type]} {ticker:20} - {label[signal_type]}")
@@ -949,7 +1097,7 @@ def main():
     print(f"  🟢 Blue Zone: {signal_counts['blue_zone_strong']} Strong + {signal_counts['blue_zone_buy']} Buy")
     print(f"  ⚡ Golden Cross: {signal_counts['golden_cross_strong']} Strong + {signal_counts['golden_cross_buy']} Buy")
     print(f"  📊 MACD: {signal_counts['macd_strong']} Strong + {signal_counts['macd_buy']} Buy")
-    print(f"  📈 200 EMA Retest: {signal_counts['200_ema_retest']}")
+    print(f"  📈 200 EMA: {signal_counts['200_ema_retest']} Retest + {signal_counts['200_ema_recovery']} Recovery")
     print(f"  📍 Total: {len(all_signals)}")
     
     print("\n" + "=" * 80)
