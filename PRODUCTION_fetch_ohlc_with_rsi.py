@@ -33,11 +33,12 @@ import os
 SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://hcgyncghmcvylnrmcivj.supabase.co')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjZ3luY2dobWN2eWxucm1jaXZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc1MTQwMTEsImV4cCI6MjA3MzA5MDAxMX0.n8vFVCJe1y_3o8fpAY0IgasZ4eKl7DAogEM3OlHB8Ww')
 
-DAYS_HISTORY = 400  # Increased from 260 to ensure EMA 200 has enough data (~200 days minimum + buffer)
+DAYS_HISTORY = 600  # Increased to ensure 200 EMA always has sufficient data even with holidays/gaps/corporate actions
 RATE_LIMIT_DELAY = 0.3  # seconds between requests
 
-# Nifty 500 tickers (501 stocks) + Portfolio stocks not in Nifty 500 (14 stocks)
-# Total: 515 stocks
+# Nifty 500 tickers (497 stocks after removing 4 with corporate action issues) + Portfolio stocks not in Nifty 500 (14 stocks)
+# Total: 511 stocks
+# Excluded (manual EMA maintenance): RAYMOND.NS, SKFINDIA.NS, ABFRL.NS, QUESS.NS
 NIFTY_500_TICKERS = [
     'DELHIVERY.NS', 'CASTROLIND.NS', 'SARDAEN.NS', 'GODIGIT.NS', 'PNCINFRA.NS',
     'AEGISLOG.NS', 'WELCORP.NS', 'IDEA.NS', '360ONE.NS', 'SAPPHIRE.NS', 'ASTRAL.NS',
@@ -55,14 +56,14 @@ NIFTY_500_TICKERS = [
     'HEROMOTOCO.NS', 'SBILIFE.NS', 'RBLBANK.NS', 'KIRLOSENG.NS', 'JUSTDIAL.NS',
     'POWERINDIA.NS', 'SYNGENE.NS', 'FINPIPE.NS', 'INDIANB.NS', 'SONACOMS.NS',
     'JINDALSTEL.NS', 'FSL.NS', 'HAL.NS', 'GLENMARK.NS', 'HSCL.NS', 'SCHAEFFLER.NS',
-    'HDFCBANK.NS', 'CENTURYPLY.NS', 'SUNDRMFAST.NS', 'QUESS.NS', 'TATAELXSI.NS',
+    'HDFCBANK.NS', 'CENTURYPLY.NS', 'SUNDRMFAST.NS', 'TATAELXSI.NS',
     'INDUSINDBK.NS', 'HBLENGINE.NS', 'NHPC.NS', 'FLUOROCHEM.NS', 'PHOENIXLTD.NS',
     'METROBRAND.NS', 'UPL.NS', 'LINDEINDIA.NS', 'KPIL.NS', 'KALYANKJIL.NS',
     'ATUL.NS', 'TATASTEEL.NS', 'AUBANK.NS', 'MANAPPURAM.NS', 'NMDC.NS',
     'TATACONSUM.NS', 'M&M.NS', 'MARUTI.NS', 'PFC.NS', 'PRAJIND.NS', 'TECHNOE.NS',
     'J&KBANK.NS', 'CHEMPLASTS.NS', 'LTTS.NS', 'JBCHEPHARM.NS', 'AFFLE.NS',
     'KAJARIACER.NS', 'UCOBANK.NS', 'ELGIEQUIP.NS', 'TATACOMM.NS', 'IIFL.NS',
-    'HINDZINC.NS', 'RAYMOND.NS', 'MUTHOOTFIN.NS', 'AWL.NS', 'UTIAMC.NS', 'ELECON.NS',
+    'HINDZINC.NS', 'MUTHOOTFIN.NS', 'AWL.NS', 'UTIAMC.NS', 'ELECON.NS',
     'NATIONALUM.NS', 'ICICIBANK.NS', 'SHYAMMETL.NS', 'MANYAVAR.NS', 'NLCINDIA.NS',
     'MFSL.NS', 'CHALET.NS', 'COALINDIA.NS', 'ENDURANCE.NS', 'PETRONET.NS',
     'BLUESTARCO.NS', 'AARTIIND.NS', 'CIEINDIA.NS', 'CLEAN.NS', 'IGL.NS',
@@ -71,7 +72,7 @@ NIFTY_500_TICKERS = [
     'PEL.NS', 'ADANIPOWER.NS', 'JSWENERGY.NS', 'GRANULES.NS', 'ADANIPORTS.NS',
     'MINDACORP.NS', 'NETWORK18.NS', 'FEDERALBNK.NS', 'HONASA.NS', 'AUROPHARMA.NS',
     'UNIONBANK.NS', 'CERA.NS', 'MGL.NS', 'ACE.NS', 'CUB.NS', 'BIKAJI.NS',
-    'JUBLPHARMA.NS', 'SOLARINDS.NS', 'BBTC.NS', 'ABFRL.NS', 'TATAPOWER.NS',
+    'JUBLPHARMA.NS', 'SOLARINDS.NS', 'BBTC.NS', 'TATAPOWER.NS',
     'POLYCAB.NS', 'TIMKEN.NS', 'TCS.NS', 'SPARC.NS', 'ZFCVINDIA.NS', 'FINEORG.NS',
     'RENUKA.NS', 'CANBK.NS', 'ADANIGREEN.NS', 'GRINFRA.NS', 'MSUMI.NS',
     'TATACHEM.NS', 'RRKABEL.NS', 'RELIANCE.NS', 'HEG.NS', 'SUPREMEIND.NS',
@@ -101,7 +102,7 @@ NIFTY_500_TICKERS = [
     'GLAND.NS', 'OIL.NS', 'SJVN.NS', 'COLPAL.NS', 'RKFORGE.NS', 'MASTEK.NS',
     'INDIGO.NS', 'DALBHARAT.NS', 'ACC.NS', 'BALKRISIND.NS', 'NSLNISP.NS', 'SUNTV.NS',
     'JKTYRE.NS', 'HINDUNILVR.NS', 'BAJAJ_AUTO.NS', 'ZOMATO.NS', 'BEL.NS',
-    'UNITDSPR.NS', 'TATAINVEST.NS', 'LATENTVIEW.NS', 'SKFINDIA.NS', 'SHREECEM.NS',
+    'UNITDSPR.NS', 'TATAINVEST.NS', 'LATENTVIEW.NS', 'SHREECEM.NS',
     'TRIVENI.NS', 'BAJAJFINSV.NS', 'ACI.NS', 'BDL.NS', 'ZYDUSLIFE.NS', 'HCLTECH.NS',
     'NETWEB.NS', 'ERIS.NS', 'ANANTRAJ.NS', 'NEWGEN.NS', 'GILLETTE.NS', 'TTML.NS',
     'IRCON.NS', 'SOBHA.NS', 'GRASIM.NS', 'RAILTEL.NS', 'BATAINDIA.NS',
@@ -155,7 +156,7 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
 
 def calculate_ema(series: pd.Series, span: int) -> pd.Series:
     """Calculate EMA (Exponential Moving Average)"""
-    return series.ewm(span=span, adjust=False, min_periods=span).mean()
+    return series.ewm(span=span, adjust=False).mean()
 
 def resample_to_weekly(daily_df: pd.DataFrame) -> pd.DataFrame:
     """Resample daily data to weekly data"""
