@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 PRODUCTION: Entry Signals Scanner for Nifty 500
-Scans for: Narrow CPR, Blue Zone, Golden Cross (with ADX), MACD (with ADX), 200 EMA Retest
+Scans for: Narrow CPR, Blue Zone, Golden Cross (with ADX), MACD (with ADX), 200 EMA Retest, Promoter Buying
 
 UPDATED CRITERIA (Jan 2026):
 - Narrow CPR: < 0.3% width, within 0.5% of L3, volume > 1.2x
@@ -9,10 +9,11 @@ UPDATED CRITERIA (Jan 2026):
 - Golden Cross: 20×50 EMA cross, ADX > 25 + +DI > -DI required for Strong Buy
 - MACD: Bullish crossover, ADX > 25 + +DI > -DI required for Strong Buy
 - 200 EMA: Within 2%, peak 8%+ above, previous touch with volume
+- Promoter Buying: Recent promoter acquisitions in last 30 days
 
 Schedule: Daily at 8:00 AM IST (after OHLC fetch at 7:00 AM)
 Runtime: ~15-20 minutes for 500 stocks
-Expected Signals: 20-30 high-quality opportunities
+Expected Signals: 25-40 high-quality opportunities
 """
 
 import yfinance as yf
@@ -22,6 +23,8 @@ from datetime import datetime, timedelta
 from supabase import create_client, Client
 from typing import List, Dict, Tuple, Optional
 import time
+import requests
+from bs4 import BeautifulSoup
 
 # ============================================
 # CONFIGURATION
@@ -200,6 +203,158 @@ def get_stock_name(ticker: str) -> str:
         return name
     except:
         return ticker.replace('.NS', '')
+
+# ============================================
+# PROMOTER BUYING DETECTION
+# ============================================
+
+def get_recent_promoter_transactions() -> List[Dict]:
+    """
+    Scrape recent promoter transactions from Trendlyne
+    Returns list of promoter transactions
+    """
+    url = 'https://trendlyne.com/insider-trading/insider-trading-trends/2126/promoter/'
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return parse_promoter_transactions(response.text)
+        else:
+            print(f"  ⚠️ Trendlyne returned status {response.status_code}")
+            return []
+    except Exception as e:
+        print(f"  ❌ Error fetching promoter data: {e}")
+        return []
+
+def parse_promoter_transactions(html: str) -> List[Dict]:
+    """Parse promoter transactions from Trendlyne HTML"""
+    transactions = []
+    
+    try:
+        soup = BeautifulSoup(html, 'html.parser')
+        table = soup.find('table')
+        
+        if not table:
+            return []
+        
+        rows = table.find_all('tr')[1:]  # Skip header
+        
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) < 6:
+                continue
+            
+            try:
+                date_str = cols[0].text.strip()
+                company_name = cols[1].text.strip()
+                promoter_name = cols[2].text.strip()
+                transaction_type = cols[3].text.strip()
+                category = cols[4].text.strip()
+                
+                # Only include promoter transactions (not public/directors)
+                if 'promoter' not in category.lower():
+                    continue
+                
+                # Extract symbol from company name or link
+                symbol_link = cols[1].find('a')
+                if symbol_link and 'href' in symbol_link.attrs:
+                    href = symbol_link['href']
+                    # Extract symbol from URL like /equity/TATAMOTORS/
+                    parts = href.split('/')
+                    symbol = parts[2] if len(parts) > 2 else company_name
+                else:
+                    symbol = company_name
+                
+                transactions.append({
+                    'date': date_str,
+                    'company_name': company_name,
+                    'symbol': symbol.upper(),
+                    'promoter_name': promoter_name,
+                    'transaction_type': transaction_type,
+                    'category': category
+                })
+            except Exception as e:
+                continue
+        
+        return transactions
+        
+    except Exception as e:
+        print(f"  ❌ Error parsing promoter data: {e}")
+        return []
+
+def scan_promoter_buying_nifty500(supabase: Client, nifty_500_tickers: List[str]) -> List[Dict]:
+    """
+    Scan for promoter buying in Nifty 500 stocks
+    Returns list of promoter buying signals
+    """
+    print("\n📊 Scanning for Promoter Buying...")
+    
+    # Get all recent promoter transactions
+    all_transactions = get_recent_promoter_transactions()
+    
+    if not all_transactions:
+        print("  ⚠️ No promoter transactions found")
+        return []
+    
+    print(f"  ✅ Fetched {len(all_transactions)} total promoter transactions")
+    
+    # Get Nifty 500 symbols (without .NS)
+    nifty500_symbols = set([ticker.replace('.NS', '').upper() for ticker in nifty_500_tickers])
+    
+    # Filter for Nifty 500 stocks only
+    nifty_transactions = [
+        t for t in all_transactions 
+        if t['symbol'].upper() in nifty500_symbols
+    ]
+    
+    print(f"  ✅ Found {len(nifty_transactions)} promoter transactions in Nifty 500")
+    
+    signals = []
+    
+    for txn in nifty_transactions:
+        # Determine if it's buying or selling
+        is_buying = 'acquisition' in txn['transaction_type'].lower() or 'purchase' in txn['transaction_type'].lower()
+        
+        if not is_buying:
+            continue  # Only track buying, not selling
+        
+        ticker = txn['symbol'].upper() + '.NS'
+        
+        # Get stock name
+        stock_name = get_stock_name(ticker)
+        
+        # Get latest price from database
+        try:
+            response = supabase.table('daily_stock_snapshots')\
+                .select('close')\
+                .eq('ticker', ticker)\
+                .order('snapshot_date', desc=True)\
+                .limit(1)\
+                .execute()
+            
+            current_price = response.data[0]['close'] if response.data else None
+        except:
+            current_price = None
+        
+        signals.append({
+            'ticker': ticker,
+            'signal_type': 'promoter_buying',
+            'signal_strength': 'BUY',
+            'stock_name': stock_name,
+            'price': current_price,
+            'promoter_name': txn['promoter_name'],
+            'transaction_type': txn['transaction_type'],
+            'transaction_date': txn['date'],
+            'detected_at': datetime.now().isoformat(),
+            'notes': f"Promoter: {txn['promoter_name']} | Type: {txn['transaction_type']}"
+        })
+    
+    print(f"  ✅ Generated {len(signals)} promoter buying signals")
+    
+    return signals
 
 # ============================================
 # SIGNAL DETECTION FUNCTIONS
@@ -965,7 +1120,7 @@ def main():
     print("=" * 80)
     print("🔍 ENTRY SIGNALS SCANNER")
     print("=" * 80)
-    print(f"Scanning: Narrow CPR, Blue Zone, Golden Cross, MACD, 200 EMA Retest")
+    print(f"Scanning: Narrow CPR, Blue Zone, Golden Cross, MACD, 200 EMA Retest, Promoter Buying")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Initialize Supabase
@@ -1032,7 +1187,8 @@ def main():
         'macd_strong': 0,
         'macd_buy': 0,
         '200_ema_retest': 0,
-        '200_ema_recovery': 0
+        '200_ema_recovery': 0,
+        'promoter_buying': 0
     }
     
     for i, ticker in enumerate(tickers, 1):
@@ -1061,7 +1217,8 @@ def main():
                 'macd_strong': '📊📊',
                 'macd_buy': '📊',
                 '200_ema_retest': '📈',
-                '200_ema_recovery': '🚀'
+                '200_ema_recovery': '🚀',
+                'promoter_buying': '🏦'
             }
             
             label = {
@@ -1073,12 +1230,20 @@ def main():
                 'macd_strong': 'MACD STRONG',
                 'macd_buy': 'MACD BUY',
                 '200_ema_retest': '200 EMA RETEST',
-                '200_ema_recovery': '200 EMA RECOVERY'
+                '200_ema_recovery': '200 EMA RECOVERY',
+                'promoter_buying': 'PROMOTER BUYING'
             }
             
             print(f"  {emoji[signal_type]} {ticker:20} - {label[signal_type]}")
         
         time.sleep(0.1)  # Rate limiting
+    
+    # Scan for promoter buying (separate from per-stock scan)
+    promoter_signals = scan_promoter_buying_nifty500(supabase, tickers)
+    for signal in promoter_signals:
+        all_signals.append(signal)
+        signal_counts['promoter_buying'] += 1
+        print(f"  🏦 {signal['ticker']:20} - PROMOTER BUYING ({signal['promoter_name']})")
     
     # Save signals
     if all_signals:
@@ -1098,6 +1263,7 @@ def main():
     print(f"  ⚡ Golden Cross: {signal_counts['golden_cross_strong']} Strong + {signal_counts['golden_cross_buy']} Buy")
     print(f"  📊 MACD: {signal_counts['macd_strong']} Strong + {signal_counts['macd_buy']} Buy")
     print(f"  📈 200 EMA: {signal_counts['200_ema_retest']} Retest + {signal_counts['200_ema_recovery']} Recovery")
+    print(f"  🏦 Promoter Buying: {signal_counts['promoter_buying']}")
     print(f"  📍 Total: {len(all_signals)}")
     
     print("\n" + "=" * 80)
