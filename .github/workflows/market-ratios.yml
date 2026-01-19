@@ -2,7 +2,7 @@ name: Daily Market Ratios Update
 
 on:
   schedule:
-    - cron: '30 10 * * 1-5'  # 4:00 PM IST, Mon-Fri
+    - cron: '30 1 * * 1-5'  # 7:00 AM IST, Mon-Fri
   workflow_dispatch:
 
 jobs:
