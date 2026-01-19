@@ -1,0 +1,23 @@
+name: Daily Market Ratios Update
+
+on:
+  schedule:
+    - cron: '30 10 * * 1-5'  # 4:00 PM IST, Mon-Fri
+  workflow_dispatch:
+
+jobs:
+  update-ratios:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: pip install yfinance supabase pandas
+    - name: Run Scanner
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      run: python market_ratios_scanner.py
