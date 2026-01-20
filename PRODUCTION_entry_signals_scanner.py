@@ -211,17 +211,25 @@ def get_stock_name(ticker: str) -> str:
 def get_recent_promoter_transactions() -> List[Dict]:
     """
     Scrape recent promoter transactions from Trendlyne
-    Returns list of promoter transactions
+    Returns list of promoter transactions from last 7 days
     """
-    url = 'https://trendlyne.com/insider-trading/insider-trading-trends/2126/promoter/'
+    # FIXED: New Trendlyne URL (Jan 2026)
+    url = 'https://trendlyne.com/equity/group-insider-trading-sast/index/NIFTY500/nifty-500/'
+    
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://trendlyne.com/',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
-            return parse_promoter_transactions(response.text)
+            # Parse with 7-day lookback window
+            return parse_promoter_transactions(response.text, days_back=7)
         else:
             print(f"  ⚠️ Trendlyne returned status {response.status_code}")
             return []
@@ -229,18 +237,30 @@ def get_recent_promoter_transactions() -> List[Dict]:
         print(f"  ❌ Error fetching promoter data: {e}")
         return []
 
-def parse_promoter_transactions(html: str) -> List[Dict]:
-    """Parse promoter transactions from Trendlyne HTML"""
+def parse_promoter_transactions(html: str, days_back: int = 7) -> List[Dict]:
+    """
+    Parse promoter transactions from Trendlyne HTML with date filtering
+    
+    Args:
+        html: HTML content from Trendlyne
+        days_back: Number of days to look back (default: 7 days)
+    """
     transactions = []
+    
+    # Calculate cutoff date (transactions older than this are ignored)
+    cutoff_date = datetime.now() - timedelta(days=days_back)
     
     try:
         soup = BeautifulSoup(html, 'html.parser')
         table = soup.find('table')
         
         if not table:
+            print("  ⚠️ No table found on Trendlyne page")
             return []
         
         rows = table.find_all('tr')[1:]  # Skip header
+        total_parsed = 0
+        filtered_count = 0
         
         for row in rows:
             cols = row.find_all('td')
@@ -248,6 +268,7 @@ def parse_promoter_transactions(html: str) -> List[Dict]:
                 continue
             
             try:
+                total_parsed += 1
                 date_str = cols[0].text.strip()
                 company_name = cols[1].text.strip()
                 promoter_name = cols[2].text.strip()
@@ -256,6 +277,52 @@ def parse_promoter_transactions(html: str) -> List[Dict]:
                 
                 # Only include promoter transactions (not public/directors)
                 if 'promoter' not in category.lower():
+                    continue
+                
+                # CRITICAL: Parse and filter by date
+                try:
+                    transaction_date = None
+                    
+                    # Try multiple date formats
+                    # Format 1: "20 Jan 2026"
+                    try:
+                        transaction_date = datetime.strptime(date_str, '%d %b %Y')
+                    except:
+                        pass
+                    
+                    # Format 2: "20-Jan-26"
+                    if not transaction_date:
+                        try:
+                            transaction_date = datetime.strptime(date_str, '%d-%b-%y')
+                        except:
+                            pass
+                    
+                    # Format 3: "Jan 20, 2026"
+                    if not transaction_date:
+                        try:
+                            transaction_date = datetime.strptime(date_str, '%b %d, %Y')
+                        except:
+                            pass
+                    
+                    # Format 4: "20/01/2026"
+                    if not transaction_date:
+                        try:
+                            transaction_date = datetime.strptime(date_str, '%d/%m/%Y')
+                        except:
+                            pass
+                    
+                    # If we couldn't parse the date, skip this transaction
+                    if not transaction_date:
+                        print(f"  ⚠️ Could not parse date: {date_str}")
+                        continue
+                    
+                    # Filter: Only include transactions within last N days
+                    if transaction_date < cutoff_date:
+                        filtered_count += 1
+                        continue  # Too old, skip
+                    
+                except Exception as e:
+                    print(f"  ⚠️ Error parsing date {date_str}: {e}")
                     continue
                 
                 # Extract symbol from company name or link
@@ -270,6 +337,7 @@ def parse_promoter_transactions(html: str) -> List[Dict]:
                 
                 transactions.append({
                     'date': date_str,
+                    'parsed_date': transaction_date.strftime('%Y-%m-%d'),
                     'company_name': company_name,
                     'symbol': symbol.upper(),
                     'promoter_name': promoter_name,
@@ -278,6 +346,10 @@ def parse_promoter_transactions(html: str) -> List[Dict]:
                 })
             except Exception as e:
                 continue
+        
+        print(f"  📊 Parsed {total_parsed} total transactions")
+        print(f"  🗓️ Filtered out {filtered_count} transactions older than {days_back} days")
+        print(f"  ✅ Kept {len(transactions)} recent transactions")
         
         return transactions
         
