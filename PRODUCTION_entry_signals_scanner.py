@@ -837,232 +837,400 @@ def check_macd_signal(daily_df: pd.DataFrame, current_price: float) -> Optional[
     except Exception as e:
         return None
 
-def check_200_ema_retest(daily_df: pd.DataFrame, current_price: float) -> Optional[Dict]:
+# ============================================================================
+# 200 EMA BOUNCE CONFIRMATION - OPTION B WITH FILTERS
+# Two-stage process: Detect touches, confirm bounces with filters
+# ============================================================================
+
+def detect_200_ema_touch(daily_df: pd.DataFrame, ticker: str, supabase) -> Optional[Dict]:
     """
-    Check for 200 EMA Retest signal
-    
-    UPDATED CRITERIA (High Quality):
-    - Price within 2% of 200 EMA (close retest, not floating)
-    - Stock was 10%+ above 200 EMA in last 20 days (recent strong trend)
-    - 50 EMA > 3% above 200 EMA (clear trend separation - Minervini style)
-    - 50 EMA rising (momentum intact)
-    - Volume > 1.3x (bounce confirmation)
-    - RSI > 40 (orderly pullback, not panic)
+    STAGE 1: Detect when price comes within 2% of 200 EMA
+    Store in tracking table for monitoring
     """
-    if len(daily_df) < 60:
+    if len(daily_df) < 200:
         return None
     
     try:
         latest = daily_df.iloc[-1]
         
         # Get EMA values
+        ema_20 = latest.get('ema_20')
         ema_50 = latest.get('ema_50')
         ema_200 = latest.get('ema_200')
         rsi_14 = latest.get('rsi_14')
         
-        if pd.isna(ema_50) or pd.isna(ema_200) or pd.isna(rsi_14):
+        if pd.isna(ema_20) or pd.isna(ema_50) or pd.isna(ema_200) or pd.isna(rsi_14):
             return None
         
-        # Check if 50 EMA above 200 EMA (trend intact)
-        if ema_50 <= ema_200:
+        current_price = latest['close']
+        current_low = latest['low']
+        
+        # Check if within 2% of 200 EMA (using low of day)
+        distance_pct = ((current_low - ema_200) / ema_200) * 100
+        
+        if abs(distance_pct) > 2.0:
             return None
         
-        # NEW: Check 50 EMA > 3% above 200 EMA (clear trend separation)
-        ema_separation = ((ema_50 - ema_200) / ema_200) * 100
-        if ema_separation < 3.0:
+        # Calculate prior peak (last 60 days)
+        last_60_days = daily_df.iloc[-60:] if len(daily_df) >= 60 else daily_df
+        prior_peak = last_60_days['high'].max()
+        prior_peak_distance = ((prior_peak - ema_200) / ema_200) * 100
+        
+        # Check if peak was at least 8% above 200 EMA
+        if prior_peak_distance < 8.0:
             return None
         
-        # TIGHTENED: Check if price near 200 EMA (within 2%, was 5%)
-        distance_from_200ema = ((current_price - ema_200) / ema_200) * 100
-        if distance_from_200ema < -2 or distance_from_200ema > 2:
-            return None
+        # Determine EMA alignment
+        if ema_20 > ema_50 > ema_200:
+            ema_alignment = 'bullish'
+        elif ema_20 < ema_50 < ema_200:
+            ema_alignment = 'bearish'
+        else:
+            ema_alignment = 'mixed'
         
-        # Check if 50 EMA rising
-        ema_50_10d_ago = daily_df.iloc[-11].get('ema_50') if len(daily_df) >= 11 else None
-        ema_50_rising = ema_50 > ema_50_10d_ago if pd.notna(ema_50_10d_ago) else False
+        # Check for recent failed tests
+        last_failed_test = check_recent_failed_test(supabase, ticker, 30)
         
-        if not ema_50_rising:
-            return None
+        # Count successful bounces in last 6 months
+        successful_bounces = count_successful_bounces(supabase, ticker, 180)
         
-        # TIGHTENED: Check recent strength (10%+ above 200 EMA in last 20 days, was 5% in 30 days)
-        last_20_days = daily_df.tail(20)
-        ema_200_values = last_20_days['ema_200']
-        close_values = last_20_days['close']
+        # Determine candle type
+        candle_type = 'green' if latest['close'] > latest['open'] else 'red'
         
-        # Calculate max distance above 200 EMA in last 20 days
-        distances = ((close_values - ema_200_values) / ema_200_values * 100).dropna()
-        peak_above_200ema_20d = distances.max() if len(distances) > 0 else 0
-        
-        if peak_above_200ema_20d < 10:  # Wasn't recently strong enough
-            return None
-        
-        # NEW: Volume confirmation (bounce with volume)
-        avg_volume = daily_df['volume'].tail(20).mean()
-        current_volume = latest['volume']
-        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
-        
-        if volume_ratio < 1.3:  # Need volume confirmation
-            return None
-        
-        # NEW: RSI check (orderly pullback, not panic)
-        if rsi_14 < 40:
-            return None
-        
-        return {
-            'signal_type': '200_ema_retest',
-            'signal_strength': 'regular',
-            'distance_from_200ema': round(distance_from_200ema, 2),
-            'ema_separation': round(ema_separation, 2),
-            'ema_50_rising': ema_50_rising,
-            'peak_above_200ema_20d': round(peak_above_200ema_20d, 2),
-            'volume_ratio': round(volume_ratio, 2),
-            'rsi_14': round(rsi_14, 2),
-            'ema_50': round(ema_50, 2),
-            'ema_200': round(ema_200, 2)
+        # Prepare touch data
+        touch_data = {
+            'ticker': ticker,
+            'touch_date': latest.name.strftime('%Y-%m-%d'),
+            'touch_price': float(current_price),
+            'touch_low': float(current_low),
+            'ema_200_value': float(ema_200),
+            'distance_from_ema': float(distance_pct),
+            'touch_volume': int(latest['volume']),
+            'touch_rsi': float(rsi_14),
+            'touch_candle_type': candle_type,
+            'ema_20': float(ema_20),
+            'ema_50': float(ema_50),
+            'ema_alignment': ema_alignment,
+            'prior_peak_price': float(prior_peak),
+            'prior_peak_distance': float(prior_peak_distance),
+            'last_failed_test_date': last_failed_test,
+            'successful_bounces_6m': successful_bounces,
+            'confirmation_status': 'pending'
         }
+        
+        return touch_data
         
     except Exception as e:
         return None
 
-def check_200_ema_recovery_breakout(daily_df: pd.DataFrame, current_price: float) -> Optional[Dict]:
-    """
-    Check for 200 EMA Recovery Breakout signal (Stage 1 -> Stage 2 transition)
-    
-    Detects stocks breaking out AFTER consolidating below 200 EMA (Minervini-style base breakout)
-    
-    CRITERIA:
-    - Stock was below 200 EMA for 15-40 days (consolidation period)
-    - Stock was previously strong (10%+ above 200 EMA before consolidation)
-    - 50 EMA still above 200 EMA (trend not broken)
-    - Price closes above 200 EMA (breakout)
-    - Volume > 2x (strong breakout confirmation)
-    - ADX > 20 (trend forming)
-    - RSI > 50 (momentum positive)
-    - 50 EMA turning up (momentum building)
-    - Consolidation range < 10% (tight base, not wild swings)
-    """
-    if len(daily_df) < 60:
-        return None
-    
+
+def save_200_ema_touch(supabase, touch_data: Dict, stock_name: str) -> bool:
+    """Save detected touch to tracking table"""
     try:
+        # Check if already exists
+        existing = supabase.table('ema_200_touch_tracking')\
+            .select('id')\
+            .eq('ticker', touch_data['ticker'])\
+            .eq('touch_date', touch_data['touch_date'])\
+            .execute()
+        
+        if existing.data:
+            return False
+        
+        # Add stock name
+        touch_data['stock_name'] = stock_name
+        
+        # Insert new touch
+        supabase.table('ema_200_touch_tracking').insert(touch_data).execute()
+        return True
+        
+    except Exception as e:
+        return False
+
+
+def check_bounce_confirmation(supabase, ticker: str, daily_df: pd.DataFrame) -> Optional[Dict]:
+    """
+    STAGE 2: Check if pending touches have confirmed bounces
+    Apply all filters and scoring
+    """
+    try:
+        # Get pending touches for this ticker
+        pending = supabase.table('ema_200_touch_tracking')\
+            .select('*')\
+            .eq('ticker', ticker)\
+            .eq('confirmation_status', 'pending')\
+            .order('touch_date', desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if not pending.data:
+            return None
+        
+        # Check most recent pending touch
+        touch = pending.data[0]
+        touch_date = datetime.strptime(touch['touch_date'], '%Y-%m-%d').date()
+        today = datetime.now().date()
+        
+        # Must be at least 1 day after touch
+        if (today - touch_date).days < 1:
+            return None
+        
+        # Get today's data
         latest = daily_df.iloc[-1]
         
-        # Get EMA and indicator values
-        ema_50 = latest.get('ema_50')
-        ema_200 = latest.get('ema_200')
-        rsi_14 = latest.get('rsi_14')
-        
-        if pd.isna(ema_50) or pd.isna(ema_200) or pd.isna(rsi_14):
-            return None
-        
-        # Calculate ADX for trend confirmation
-        daily_df = calculate_adx(daily_df)
-        adx_value = latest['adx']
-        
-        # Check if price just crossed above 200 EMA (breakout day)
-        if current_price <= ema_200:
-            return None
-        
-        # Look back to find consolidation period below 200 EMA
-        days_below_200ema = 0
-        consolidation_start_idx = None
-        consolidation_highs = []
-        consolidation_lows = []
-        
-        # Count consecutive days below 200 EMA before today
-        for i in range(len(daily_df) - 2, max(0, len(daily_df) - 50), -1):
-            row = daily_df.iloc[i]
-            row_ema_200 = row.get('ema_200')
-            
-            if pd.isna(row_ema_200):
-                break
-            
-            if row['close'] < row_ema_200:
-                days_below_200ema += 1
-                consolidation_highs.append(row['high'])
-                consolidation_lows.append(row['low'])
-                if consolidation_start_idx is None:
-                    consolidation_start_idx = i
-            else:
-                break  # Stop when we hit a day above 200 EMA
-        
-        # Check if consolidation duration is in range (15-40 days)
-        if days_below_200ema < 15 or days_below_200ema > 40:
-            return None
-        
-        # Check consolidation range (must be tight, < 10%)
-        if consolidation_highs and consolidation_lows:
-            consolidation_range = ((max(consolidation_highs) - min(consolidation_lows)) / min(consolidation_lows)) * 100
-            if consolidation_range > 10:
-                return None  # Too wide, not a tight base
-        else:
-            return None
-        
-        # Check if 50 EMA still above 200 EMA (trend not broken during consolidation)
-        if ema_50 <= ema_200:
-            return None
-        
-        # Check if stock was previously strong (10%+ above 200 EMA before consolidation)
-        if consolidation_start_idx and consolidation_start_idx > 20:
-            pre_consolidation_days = daily_df.iloc[consolidation_start_idx - 20:consolidation_start_idx]
-            pre_consolidation_ema_200 = pre_consolidation_days['ema_200']
-            pre_consolidation_closes = pre_consolidation_days['close']
-            
-            distances_before = ((pre_consolidation_closes - pre_consolidation_ema_200) / pre_consolidation_ema_200 * 100).dropna()
-            peak_before_consolidation = distances_before.max() if len(distances_before) > 0 else 0
-            
-            if peak_before_consolidation < 10:
-                return None  # Wasn't strong enough before consolidation
-        else:
-            return None
-        
-        # Check if 50 EMA is turning up (momentum building)
-        ema_50_5d_ago = daily_df.iloc[-6].get('ema_50') if len(daily_df) >= 6 else None
-        ema_50_turning_up = ema_50 > ema_50_5d_ago if pd.notna(ema_50_5d_ago) else False
-        
-        if not ema_50_turning_up:
-            return None
-        
-        # Volume confirmation (strong breakout)
-        avg_volume = daily_df['volume'].tail(20).mean()
+        current_price = latest['close']
         current_volume = latest['volume']
-        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
+        touch_low = touch['touch_low']
+        ema_200 = touch['ema_200_value']
         
-        if volume_ratio < 2.0:  # Need strong volume (2x, higher than retest)
+        # CONFIRMATION REQUIREMENTS (Option B)
+        
+        # 1. Must close ABOVE 200 EMA
+        if current_price < ema_200:
             return None
         
-        # ADX check (trend forming)
-        if adx_value < 20:
+        # 2. Must be GREEN candle
+        if latest['close'] <= latest['open']:
             return None
         
-        # RSI check (positive momentum, not weak bounce)
-        if rsi_14 < 50:
+        # 3. Must be higher than touch day close
+        if current_price <= touch['touch_price']:
             return None
         
-        # Calculate how close we are to breaking out (distance from 200 EMA on breakout day)
-        distance_from_200ema = ((current_price - ema_200) / ema_200) * 100
+        # 4. Volume must be decent (> 1.2x average)
+        avg_volume = daily_df['volume'].iloc[-20:].mean()
+        if current_volume < avg_volume * 1.2:
+            return None
         
-        return {
-            'signal_type': '200_ema_recovery',
-            'signal_strength': 'regular',
-            'days_consolidated': days_below_200ema,
-            'consolidation_range': round(consolidation_range, 2),
-            'peak_before_consolidation': round(peak_before_consolidation, 2),
-            'distance_from_200ema': round(distance_from_200ema, 2),
-            'volume_ratio': round(volume_ratio, 2),
-            'adx': round(float(adx_value), 2),
-            'rsi_14': round(rsi_14, 2),
-            'ema_50_turning_up': ema_50_turning_up,
-            'ema_50': round(ema_50, 2),
-            'ema_200': round(ema_200, 2)
+        # APPLY FILTERS
+        filters_passed = apply_confirmation_filters(daily_df, touch, latest)
+        
+        if not filters_passed['all_critical_passed']:
+            update_touch_status(supabase, touch['id'], 'failed', None)
+            return None
+        
+        # CALCULATE SIGNAL QUALITY
+        quality_score = calculate_signal_quality(filters_passed, touch, latest)
+        signal_strength = 'STRONG' if quality_score >= 4 else 'BUY'
+        
+        # Calculate bounce percentage
+        bounce_pct = ((current_price - touch_low) / touch_low) * 100
+        
+        # Preparation confirmation data
+        confirmation_data = {
+            'confirmation_date': today.strftime('%Y-%m-%d'),
+            'confirmation_price': float(current_price),
+            'confirmation_volume': int(current_volume),
+            'bounce_percentage': float(bounce_pct),
+            'quality_score': quality_score,
+            'signal_strength': signal_strength,
+            **filters_passed
         }
+        
+        # Update tracking table
+        update_touch_status(supabase, touch['id'], 'confirmed', confirmation_data)
+        
+        # Generate signal
+        signal = generate_200_ema_signal(touch, confirmation_data, current_price)
+        
+        return signal
         
     except Exception as e:
         return None
 
-# ============================================
-# MAIN SCANNING LOGIC
-# ============================================
+
+def apply_confirmation_filters(daily_df: pd.DataFrame, touch: Dict, latest) -> Dict:
+    """Apply all confirmation filters"""
+    results = {}
+    
+    # REJECT FILTERS (Critical)
+    
+    # 1. EMA alignment - reject if strong bearish
+    ema_20 = touch['ema_20']
+    ema_50 = touch['ema_50']
+    ema_200 = touch['ema_200_value']
+    
+    strong_bearish = (ema_20 < ema_50 < ema_200)
+    results['passed_ema_alignment'] = not strong_bearish
+    
+    # 2. Volume trend - reject if declining
+    vol_20_day_avg = daily_df['volume'].iloc[-20:].mean()
+    vol_previous_20_avg = daily_df['volume'].iloc[-40:-20].mean() if len(daily_df) >= 40 else vol_20_day_avg
+    
+    volume_declining = (vol_20_day_avg < vol_previous_20_avg * 0.8)
+    results['passed_volume_check'] = not volume_declining
+    
+    # 3. Recent failed test
+    has_recent_failure = touch['last_failed_test_date'] is not None
+    results['passed_recent_failure_check'] = not has_recent_failure
+    
+    # STRENGTHEN FILTERS (Optional)
+    
+    # 4. RSI recovery
+    touch_rsi = touch['touch_rsi']
+    current_rsi = latest.get('rsi_14', 50)
+    
+    rsi_was_oversold = touch_rsi < 40
+    rsi_recovering = current_rsi > touch_rsi + 5
+    results['passed_rsi_check'] = rsi_was_oversold and rsi_recovering
+    
+    # 5. Prior success
+    results['has_prior_success'] = touch['successful_bounces_6m'] > 0
+    
+    # Critical filters result
+    critical_filters = [
+        results['passed_ema_alignment'],
+        results['passed_volume_check'],
+        results['passed_recent_failure_check']
+    ]
+    results['all_critical_passed'] = all(critical_filters)
+    
+    return results
+
+
+def calculate_signal_quality(filters: Dict, touch: Dict, latest) -> int:
+    """Calculate 1-5 star quality score"""
+    score = 3  # Base for passing critical filters
+    
+    if filters['passed_rsi_check']:
+        score += 1
+    
+    if filters['has_prior_success']:
+        score += 1
+    
+    return score
+
+
+def generate_200_ema_signal(touch: Dict, confirmation: Dict, current_price: float) -> Dict:
+    """Generate final signal for dashboard"""
+    
+    # Calculate days to confirmation
+    touch_date = datetime.strptime(touch['touch_date'], '%Y-%m-%d')
+    confirm_date = datetime.strptime(confirmation['confirmation_date'], '%Y-%m-%d')
+    days_to_confirm = (confirm_date - touch_date).days
+    
+    # Build quality stars
+    stars = '⭐' * confirmation['quality_score']
+    
+    # Build detailed notes
+    notes = f"""200 EMA Bounce Confirmed {stars}
+
+Touch: {touch['touch_date']} @ ₹{touch['touch_low']:.2f}
+Confirm: {confirmation['confirmation_date']} @ ₹{confirmation['confirmation_price']:.2f}
+Bounce: +{confirmation['bounce_percentage']:.1f}% from low
+Confirmation: {days_to_confirm} day(s)
+
+Filters:
+{'✅' if confirmation['passed_ema_alignment'] else '❌'} EMA Alignment: {touch['ema_alignment']}
+{'✅' if confirmation['passed_volume_check'] else '❌'} Volume: Expanding
+{'✅' if confirmation['passed_recent_failure_check'] else '❌'} No Recent Failures
+{'✅' if confirmation['passed_rsi_check'] else '➖'} RSI Recovery
+{'✅' if confirmation['has_prior_success'] else '➖'} Prior Success: {touch['successful_bounces_6m']} in 6M
+
+Quality: {confirmation['quality_score']}/5"""
+    
+    signal = {
+        'signal_type': '200_ema_bounce_confirmed',
+        'signal_strength': confirmation['signal_strength'].lower(),
+        'notes': notes,
+        'price': current_price,
+        'quality_score': confirmation['quality_score'],
+        'bounce_percentage': confirmation['bounce_percentage']
+    }
+    
+    return signal
+
+
+# Helper functions
+
+def check_recent_failed_test(supabase, ticker: str, days: int) -> Optional[str]:
+    """Check if stock had failed 200 EMA test recently"""
+    try:
+        cutoff = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        
+        result = supabase.table('ema_200_touch_tracking')\
+            .select('touch_date')\
+            .eq('ticker', ticker)\
+            .eq('confirmation_status', 'failed')\
+            .gte('touch_date', cutoff)\
+            .order('touch_date', desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if result.data:
+            return result.data[0]['touch_date']
+        return None
+        
+    except:
+        return None
+
+
+def count_successful_bounces(supabase, ticker: str, days: int) -> int:
+    """Count successful 200 EMA bounces in last N days"""
+    try:
+        cutoff = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        
+        result = supabase.table('ema_200_touch_tracking')\
+            .select('id', count='exact')\
+            .eq('ticker', ticker)\
+            .eq('confirmation_status', 'confirmed')\
+            .gte('touch_date', cutoff)\
+            .execute()
+        
+        return result.count if result.count else 0
+        
+    except:
+        return 0
+
+
+def update_touch_status(supabase, touch_id: int, status: str, confirmation_data: Optional[Dict]):
+    """Update tracking table with confirmation status"""
+    try:
+        update_data = {
+            'confirmation_status': status,
+            'signal_generated': True if status == 'confirmed' else False,
+            'signal_generated_at': datetime.now().isoformat() if status == 'confirmed' else None
+        }
+        
+        if confirmation_data:
+            update_data.update(confirmation_data)
+        
+        supabase.table('ema_200_touch_tracking')\
+            .update(update_data)\
+            .eq('id', touch_id)\
+            .execute()
+            
+    except Exception as e:
+        pass
+
+
+def scan_200_ema_with_confirmation(supabase, ticker: str, stock_name: str, daily_df: pd.DataFrame, current_price: float) -> List[Dict]:
+    """
+    Main 200 EMA scanner - replaces old check_200_ema_retest
+    Two-stage: detect touches, confirm bounces
+    """
+    signals = []
+    
+    if daily_df is None or len(daily_df) < 200:
+        return signals
+    
+    try:
+        # STAGE 1: Check for new touches
+        touch_data = detect_200_ema_touch(daily_df, ticker, supabase)
+        if touch_data:
+            if save_200_ema_touch(supabase, touch_data, stock_name):
+                print(f"  📝 200 EMA touch tracked: {ticker} @ ₹{touch_data['touch_price']:.2f}")
+        
+        # STAGE 2: Check for bounce confirmation
+        confirmed_signal = check_bounce_confirmation(supabase, ticker, daily_df)
+        if confirmed_signal:
+            signals.append(confirmed_signal)
+            print(f"  🎯 200 EMA Bounce Confirmed: {ticker} - {confirmed_signal['signal_strength'].upper()}")
+    
+    except Exception as e:
+        pass
+    
+    return signals
 
 def scan_stock(supabase: Client, ticker: str) -> List[Dict]:
     """
@@ -1110,21 +1278,12 @@ def scan_stock(supabase: Client, ticker: str) -> List[Dict]:
             macd_signal['price'] = round(current_price, 2)
             signals.append(macd_signal)
         
-        ema200_signal = check_200_ema_retest(daily_df, current_price)
-        if ema200_signal:
-            ema200_signal['ticker'] = ticker
-            ema200_signal['stock_name'] = stock_name
-            ema200_signal['price'] = round(current_price, 2)
-            signals.append(ema200_signal)
-        
-        # NEW: Check for 200 EMA Recovery Breakout (if retest didn't trigger)
-        if not ema200_signal:  # Only check recovery if retest didn't fire (avoid duplicate signals)
-            recovery_signal = check_200_ema_recovery_breakout(daily_df, current_price)
-            if recovery_signal:
-                recovery_signal['ticker'] = ticker
-                recovery_signal['stock_name'] = stock_name
-                recovery_signal['price'] = round(current_price, 2)
-                signals.append(recovery_signal)
+        # 200 EMA Bounce Confirmation (Option B with Filters)
+        ema200_signals = scan_200_ema_with_confirmation(supabase, ticker, stock_name, daily_df, current_price)
+        for ema_signal in ema200_signals:
+            ema_signal['ticker'] = ticker
+            ema_signal['stock_name'] = stock_name
+            signals.append(ema_signal)
         
         return signals
         
