@@ -19,6 +19,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 import re
+import time
 
 # =============================================================================
 # CONFIGURATION
@@ -35,8 +36,8 @@ SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e
 # Visit NSE homepage, find "Market Capitalization: Lac Crs XXX | Tn $ Y.YY"
 # Last updated: 2026-01-21
 CURRENT_MARKET_CAP = {
-    'inr_lakh_crore': 452.03,  # From NSE homepage: "Lac Crs 479.03"
-    'usd_billions': 4940,       # From NSE homepage: "Tn $ 5.32" * 1000
+    'inr_lakh_crore': 479.03,  # From NSE homepage: "Lac Crs 479.03"
+    'usd_billions': 5320,       # From NSE homepage: "Tn $ 5.32" * 1000
     'last_updated': '2026-01-21',
     'source': 'nse_homepage'
 }
@@ -45,8 +46,8 @@ CURRENT_MARKET_CAP = {
 MC_GDP_CONFIG = {
     'Q1_2026': {
         'gdp_usd_billions': 3970,  # Nominal GDP FY 2025-26 estimate (₹357 lakh crore)
-        'market_cap_usd_billions': 4940,  # Fallback if scraping fails
-        'ratio': 124.4,  # 4940 / 3970 * 100
+        'market_cap_usd_billions': 5320,  # Fallback if scraping fails
+        'ratio': 134.0,  # 5320 / 3970 * 100
         'last_updated': '2026-01-07',
         'notes': 'GDP from FY25-26 First Advance Estimates (MoSPI)'
     }
@@ -71,51 +72,56 @@ def init_supabase() -> Client:
 
 def get_nse_market_cap():
     """
-    Scrape NSE total market capitalization from NSE website
+    Fetch NSE total market capitalization via API
     
     Returns:
         tuple: (market_cap_inr_lakh_crore, market_cap_usd_billions) or (None, None)
     """
-    url = 'https://www.nseindia.com/'
+    HOME = "https://www.nseindia.com"
+    API = "https://www.nseindia.com/api/marketStatus"
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json,text/plain,*/*",
+        "Accept-Language": "en-IN,en;q=0.9",
+        "Referer": "https://www.nseindia.com/",
+        "Connection": "keep-alive",
     }
     
     try:
         session = requests.Session()
-        response = session.get(url, headers=headers, timeout=15)
+        session.headers.update(HEADERS)
         
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Look for market cap text: "Market Capitalization: Lac Crs 479.03 | Tn $ 5.32"
-            for element in soup.find_all(['div', 'span', 'p', 'td']):
-                text = element.get_text()
-                if 'Lac Crs' in text and ('Tn $' in text or 'Tn$' in text):
-                    # Extract INR value (Lac Crs format)
-                    inr_match = re.search(r'([\d,\.]+)\s*Lac Crs', text)
-                    # Extract USD value (Tn $ format)
-                    usd_match = re.search(r'([\d,\.]+)\s*Tn\s*\$', text)
-                    
-                    if inr_match and usd_match:
-                        market_cap_inr = float(inr_match.group(1).replace(',', ''))
-                        market_cap_usd_tn = float(usd_match.group(1).replace(',', ''))
-                        market_cap_usd = market_cap_usd_tn * 1000  # Convert trillion to billion
-                        
-                        return market_cap_inr, market_cap_usd
-            
+        # 1. Prime cookies by visiting homepage first
+        home_response = session.get(HOME, timeout=30)
+        if home_response.status_code != 200:
+            print(f"  ⚠️ NSE home page failed: {home_response.status_code}")
             return None, None
-        else:
+        
+        time.sleep(1)
+        
+        # 2. Fetch market cap from API
+        api_response = session.get(API, timeout=30)
+        if api_response.status_code != 200:
+            print(f"  ⚠️ NSE API failed: {api_response.status_code}")
             return None, None
-            
+        
+        data = api_response.json()
+        
+        # Extract market cap data
+        mcap = data.get("marketcap") or (data.get("marketStatus") or {}).get("marketcap")
+        if not mcap:
+            print("  ⚠️ Market cap not found in API response")
+            return None, None
+        
+        market_cap_inr = float(mcap["marketCapinLACCRRupeesFormatted"])
+        market_cap_usd_tn = float(mcap["marketCapinTRDollars"])
+        market_cap_usd = market_cap_usd_tn * 1000  # Convert trillion to billion
+        
+        return market_cap_inr, market_cap_usd
+        
     except Exception as e:
-        print(f"  ⚠️ Error scraping NSE: {e}")
+        print(f"  ⚠️ Error fetching NSE market cap: {e}")
         return None, None
 
 def get_latest_price(ticker: str, days_back: int = 5) -> float:
