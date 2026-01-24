@@ -98,7 +98,9 @@ def get_nse_market_cap():
             print(f"  ⚠️ NSE home page failed: {h.status_code}")
             return None, None
         
-        time.sleep(1)
+        # Random delay between 1-3 seconds to avoid rate limiting
+        import random
+        time.sleep(random.uniform(1.5, 3.0))
         
         # 2. Fetch market cap from API
         r = s.get(API, timeout=30)
