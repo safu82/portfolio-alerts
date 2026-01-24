@@ -199,6 +199,16 @@ def fetch_market_ratios():
     
     ratios = {}
     
+    # FETCH NSE MARKET CAP FIRST (before any other requests)
+    print("\n🇮🇳 Getting Market Cap/GDP Ratio...")
+    mc_gdp_data = get_current_mc_gdp_ratio()
+    ratios['market_cap_gdp_ratio'] = mc_gdp_data['ratio']
+    ratios['india_gdp_usd_billions'] = mc_gdp_data['gdp']
+    ratios['nse_total_mcap_usd_billions'] = mc_gdp_data['market_cap']
+    print(f"  ✅ Market Cap/GDP: {mc_gdp_data['ratio']:.1f}% ({mc_gdp_data['source']})")
+    print(f"  📈 Market Cap: ${mc_gdp_data['market_cap']:.0f}B")
+    print(f"  📊 GDP: ${mc_gdp_data['gdp']:.0f}B (Q: {mc_gdp_data['quarter']})")
+    
     # Fetch Gold
     print("\n🥇 Fetching Gold price...")
     gold_price = get_latest_price(TICKERS['gold'])
@@ -240,19 +250,6 @@ def fetch_market_ratios():
         print(f"  ✅ Nifty 50: {nifty_50:.2f}")
     else:
         print("  ❌ Failed to fetch Nifty 50")
-    
-    # Nifty SmallCap 100 - Not available on Yahoo Finance
-    # Skipping for now - can add manually from NSE if needed
-    
-    # Get Market Cap/GDP Ratio (with live NSE scraping)
-    print("\n🇮🇳 Getting Market Cap/GDP Ratio...")
-    mc_gdp_data = get_current_mc_gdp_ratio()
-    ratios['market_cap_gdp_ratio'] = mc_gdp_data['ratio']
-    ratios['india_gdp_usd_billions'] = mc_gdp_data['gdp']
-    ratios['nse_total_mcap_usd_billions'] = mc_gdp_data['market_cap']
-    print(f"  ✅ Market Cap/GDP: {mc_gdp_data['ratio']:.1f}% ({mc_gdp_data['source']})")
-    print(f"  📈 Market Cap: ${mc_gdp_data['market_cap']:.0f}B")
-    print(f"  📊 GDP: ${mc_gdp_data['gdp']:.0f}B (Q: {mc_gdp_data['quarter']})")
     
     return ratios
 
