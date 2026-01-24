@@ -89,26 +89,26 @@ def get_nse_market_cap():
     }
     
     try:
-        session = requests.Session()
-        session.headers.update(HEADERS)
+        s = requests.Session()
+        s.headers.update(HEADERS)
         
         # 1. Prime cookies by visiting homepage first
-        home_response = session.get(HOME, timeout=30)
-        if home_response.status_code != 200:
-            print(f"  ⚠️ NSE home page failed: {home_response.status_code}")
+        h = s.get(HOME, timeout=30)
+        if h.status_code != 200:
+            print(f"  ⚠️ NSE home page failed: {h.status_code}")
             return None, None
         
         time.sleep(1)
         
         # 2. Fetch market cap from API
-        api_response = session.get(API, timeout=30)
-        if api_response.status_code != 200:
-            print(f"  ⚠️ NSE API failed: {api_response.status_code}")
+        r = s.get(API, timeout=30)
+        if r.status_code != 200:
+            print(f"  ⚠️ NSE API failed: {r.status_code}")
             return None, None
         
-        data = api_response.json()
+        data = r.json()
         
-        # Extract market cap data
+        # Extract market cap data (same as standalone script)
         mcap = data.get("marketcap") or (data.get("marketStatus") or {}).get("marketcap")
         if not mcap:
             print("  ⚠️ Market cap not found in API response")
