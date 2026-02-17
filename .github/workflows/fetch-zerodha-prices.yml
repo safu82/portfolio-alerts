@@ -1,0 +1,100 @@
+name: Fetch Zerodha Live Prices
+
+on:
+  schedule:
+    # Every 5 minutes, Monday to Friday
+    # Market hours: 9:15 AM - 3:30 PM IST = 3:45 AM - 10:00 AM UTC
+    - cron: '45 3 * * 1-5'
+    - cron: '50 3 * * 1-5'
+    - cron: '55 3 * * 1-5'
+    - cron: '0 4 * * 1-5'
+    - cron: '5 4 * * 1-5'
+    - cron: '10 4 * * 1-5'
+    - cron: '15 4 * * 1-5'
+    - cron: '20 4 * * 1-5'
+    - cron: '25 4 * * 1-5'
+    - cron: '30 4 * * 1-5'
+    - cron: '35 4 * * 1-5'
+    - cron: '40 4 * * 1-5'
+    - cron: '45 4 * * 1-5'
+    - cron: '50 4 * * 1-5'
+    - cron: '55 4 * * 1-5'
+    - cron: '0 5 * * 1-5'
+    - cron: '5 5 * * 1-5'
+    - cron: '10 5 * * 1-5'
+    - cron: '15 5 * * 1-5'
+    - cron: '20 5 * * 1-5'
+    - cron: '25 5 * * 1-5'
+    - cron: '30 5 * * 1-5'
+    - cron: '35 5 * * 1-5'
+    - cron: '40 5 * * 1-5'
+    - cron: '45 5 * * 1-5'
+    - cron: '50 5 * * 1-5'
+    - cron: '55 5 * * 1-5'
+    - cron: '0 6 * * 1-5'
+    - cron: '5 6 * * 1-5'
+    - cron: '10 6 * * 1-5'
+    - cron: '15 6 * * 1-5'
+    - cron: '20 6 * * 1-5'
+    - cron: '25 6 * * 1-5'
+    - cron: '30 6 * * 1-5'
+    - cron: '35 6 * * 1-5'
+    - cron: '40 6 * * 1-5'
+    - cron: '45 6 * * 1-5'
+    - cron: '50 6 * * 1-5'
+    - cron: '55 6 * * 1-5'
+    - cron: '0 7 * * 1-5'
+    - cron: '5 7 * * 1-5'
+    - cron: '10 7 * * 1-5'
+    - cron: '15 7 * * 1-5'
+    - cron: '20 7 * * 1-5'
+    - cron: '25 7 * * 1-5'
+    - cron: '30 7 * * 1-5'
+    - cron: '35 7 * * 1-5'
+    - cron: '40 7 * * 1-5'
+    - cron: '45 7 * * 1-5'
+    - cron: '50 7 * * 1-5'
+    - cron: '55 7 * * 1-5'
+    - cron: '0 8 * * 1-5'
+    - cron: '5 8 * * 1-5'
+    - cron: '10 8 * * 1-5'
+    - cron: '15 8 * * 1-5'
+    - cron: '20 8 * * 1-5'
+    - cron: '25 8 * * 1-5'
+    - cron: '30 8 * * 1-5'
+    - cron: '35 8 * * 1-5'
+    - cron: '40 8 * * 1-5'
+    - cron: '45 8 * * 1-5'
+    - cron: '50 8 * * 1-5'
+    - cron: '55 8 * * 1-5'
+    - cron: '0 9 * * 1-5'
+    - cron: '5 9 * * 1-5'
+    - cron: '10 9 * * 1-5'
+    - cron: '0 10 * * 1-5'
+
+  workflow_dispatch:
+
+jobs:
+  fetch-prices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Call Zerodha Fetch Prices Edge Function
+        run: |
+          response=$(curl -s -o response.json -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_KEY }}" \
+            -H "Content-Type: application/json" \
+            "https://hcgyncghmcvylnrmcivj.supabase.co/functions/v1/zerodha-fetch-prices")
+          
+          echo "HTTP Status: $response"
+          echo "Response:"
+          cat response.json
+          
+          if [ "$response" != "200" ]; then
+            echo "❌ Edge function returned non-200 status"
+            exit 1
+          fi
+          
+          echo "✅ Prices fetched successfully"
