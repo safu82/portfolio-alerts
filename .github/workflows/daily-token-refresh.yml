@@ -1,0 +1,62 @@
+name: Daily Zerodha Token Refresh
+
+on:
+  schedule:
+    # Runs at 3:30 AM UTC = 9:00 AM IST every day
+    - cron: '30 3 * * *'
+  
+  # Allow manual trigger from GitHub Actions UI
+  workflow_dispatch:
+
+jobs:
+  refresh-token:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@latest
+        with:
+          chrome-version: stable
+
+      - name: Install Python dependencies
+        run: |
+          pip install selenium webdriver-manager pyotp python-dotenv kiteconnect supabase
+
+      - name: Run Zerodha token automation
+        env:
+          ZERODHA_API_KEY: ${{ secrets.ZERODHA_API_KEY }}
+          ZERODHA_API_SECRET: ${{ secrets.ZERODHA_API_SECRET }}
+          ZERODHA_USER_ID: ${{ secrets.ZERODHA_USER_ID }}
+          ZERODHA_PASSWORD: ${{ secrets.ZERODHA_PASSWORD }}
+          ZERODHA_TOTP_SECRET: ${{ secrets.ZERODHA_TOTP_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          HEADLESS: true
+        run: |
+          python zerodha_auto_token_with_supabase.py
+
+      - name: Verify token was saved
+        run: |
+          if [ -f zerodha_access_token.txt ]; then
+            echo "✅ Token file created successfully"
+            echo "Token preview: $(head -c 20 zerodha_access_token.txt)..."
+          else
+            echo "❌ Token file not found - automation may have failed"
+            exit 1
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Token refresh failed!"
+          echo "Please check the logs above and run manually if needed"
+          echo "Manual command: python zerodha_auto_token_with_supabase.py"
