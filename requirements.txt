@@ -1,4 +1,4 @@
 kiteconnect==4.2.0
-supabase==2.3.4
+supabase==2.10.0
 python-dotenv==1.0.0
 pytz==2024.1
