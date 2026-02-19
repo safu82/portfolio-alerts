@@ -2,8 +2,8 @@ name: Daily Zerodha Token Refresh
 
 on:
   schedule:
-    # Runs at 1:00 AM UTC = 6:30 AM IST every day
-    - cron: '00 1 * * *'
+    # Runs at 11:30 PM UTC = 5:00 AM IST every day
+    - cron: '30 23 * * *'
   
   # Allow manual trigger from GitHub Actions UI
   workflow_dispatch:
