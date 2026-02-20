@@ -1,13 +1,11 @@
 name: Scan Entry Signals
-
 on:
   schedule:
-   - cron: '30 2 * * *'  # 8:00 AM IST (2:30 UTC)
+   - cron: '0 14 * * *'  # 7:30 PM IST (14:00 UTC)
   workflow_dispatch:  # Allow manual trigger
-
 jobs:
   scan-signals:
-    name: Scan for Entry Signals
+    name: Scan for Entry Signals (Zerodha)
     runs-on: ubuntu-latest
     
     steps:
@@ -22,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance pandas numpy supabase
+          pip install pandas numpy supabase requests beautifulsoup4
       
       - name: Run Entry Signals Scanner
         run: python PRODUCTION_entry_signals_scanner.py
