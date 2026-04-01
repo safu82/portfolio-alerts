@@ -1,0 +1,38 @@
+name: HDFC Contract Note Ingestion
+
+on:
+  schedule:
+    # 2:00 AM IST = 8:30 PM UTC
+    - cron: '30 20 * * 1-5'  # Monday to Friday only (weekdays)
+  workflow_dispatch:  # Allow manual trigger from GitHub Actions UI
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements_contract_note.txt
+
+      - name: Run contract note ingestion
+        env:
+          GMAIL_CLIENT_ID:       ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET:   ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN:   ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          HDFC_PDF_PASSWORD:     ${{ secrets.HDFC_PDF_PASSWORD }}
+          ANTHROPIC_API_KEY:     ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL:          ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY:  ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TELEGRAM_BOT_TOKEN:    ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:      ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python hdfc_contract_note_ingestion.py
