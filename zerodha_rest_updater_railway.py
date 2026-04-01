@@ -23,7 +23,7 @@ ist = pytz.timezone('Asia/Kolkata')
 
 # Ticker mappings
 TICKER_MAPPING = {
-    'KPEL': 'KPENERGY.NS',
+    'KPEL': 'KPEL.NS',
     'TARIL': 'TRIL.NS',
     'GENUSPOWER': 'GENUSPOWER.NS',
     'DENTA': 'DENTAWATER.NS'
