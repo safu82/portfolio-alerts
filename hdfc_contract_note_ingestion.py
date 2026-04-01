@@ -280,7 +280,11 @@ def main():
     print("=" * 60)
 
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    trade_date = None
+
+    # Always compute trade_date upfront (yesterday in IST)
+    ist_offset = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    trade_date = (datetime.datetime.now(ist_offset) - datetime.timedelta(days=1)).date()
+    print(f"📅 Trade date: {trade_date}")
 
     try:
         # Step 1: Gmail
@@ -288,7 +292,7 @@ def main():
         msg, trade_date = find_contract_note_email(service)
 
         if not msg:
-            send_telegram(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, [], [], trade_date or 'unknown')
+            send_telegram(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, [], [], trade_date)
             return
 
         # Step 2: Download PDF
