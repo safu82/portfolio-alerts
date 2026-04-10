@@ -113,40 +113,78 @@ def decrypt_pdf(pdf_data, password):
     return decrypted_data
 
 
-def load_zerodha_isin_map():
+def normalize_company_name(name):
+    """Strip common suffixes and whitespace for fuzzy name matching."""
+    import re
+    name = name.upper().strip()
+    for suffix in [' LIMITED', ' LTD.', ' LTD', ' INDIA']:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)].strip()
+    return re.sub(r' +', ' ', name).strip()
+
+
+def load_zerodha_name_map():
     """
-    Download NSE equity master CSV (public, no auth) and build ISIN → ticker map.
-    Columns include: SYMBOL, SERIES, ISIN NUMBER
-    Returns dict like {'INE263A01024': 'BEL.NS', ...}
-    Called once per run — single HTTP request regardless of trade count.
+    Download Zerodha NSE instruments CSV (no auth, confirmed accessible from GitHub Actions).
+    Columns: instrument_token, exchange_token, tradingsymbol, name, instrument_type, ...
+    Builds normalized_company_name → ticker map for EQ instruments only.
     """
     import csv, io
-    url = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    resp = requests.get(url, headers=headers, timeout=15)
+    url = "https://api.kite.trade/instruments/NSE"
+    resp = requests.get(url, timeout=15)
     resp.raise_for_status()
     reader = csv.DictReader(io.StringIO(resp.text))
-    isin_map = {}
+    name_map = {}
     for row in reader:
-        isin = row.get('ISIN NUMBER', '').strip()
-        symbol = row.get(' SYMBOL', row.get('SYMBOL', '')).strip()
-        series = row.get(' SERIES', row.get('SERIES', '')).strip()
-        if isin and symbol and series == 'EQ':
-            isin_map[isin] = symbol + '.NS'
-    print(f"✅ Loaded {len(isin_map):,} NSE instruments from NSE equity master")
-    return isin_map
+        if row.get('instrument_type') == 'EQ':
+            raw_name = row.get('name', '').strip()
+            symbol   = row.get('tradingsymbol', '').strip()
+            if raw_name and symbol:
+                name_map[normalize_company_name(raw_name)] = symbol + '.NS'
+    print(f"✅ Loaded {len(name_map):,} NSE EQ instruments from Zerodha")
+    return name_map
 
 
-def resolve_ticker_from_isin(isin, name, isin_map):
-    """Look up NSE ticker from pre-loaded Zerodha instruments map."""
-    ticker = isin_map.get(isin)
-    if not ticker:
-        raise ValueError(f"ISIN {isin} ({name}) not found in Zerodha instruments — add manually.")
-    print(f"  🔍 ISIN {isin} → {ticker}")
-    return ticker
+def resolve_ticker_from_supabase(name, supabase):
+    """
+    Look up ticker from our own transactions table by stock name.
+    Reliable for any stock we have previously traded (all SELLs, repeat BUYs).
+    """
+    result = supabase.table('transactions').select('ticker').eq(
+        'portfolio', PORTFOLIO
+    ).eq('stock', name).limit(1).execute()
+    if result.data:
+        ticker = result.data[0]['ticker']
+        print(f"  🔍 '{name}' → {ticker} (from Supabase)")
+        return ticker
+    return None
 
 
-def parse_trades_with_claude(pdf_data, trade_date):
+def resolve_ticker_from_isin(isin, name, name_map, supabase):
+    """
+    Resolve NSE ticker with two-stage fallback:
+    1. Supabase transactions table (covers all SELLs + previously bought stocks)
+    2. Zerodha NSE instruments name map (new BUY positions only)
+    """
+    # Stage 1: check our own database first
+    ticker = resolve_ticker_from_supabase(name, supabase)
+    if ticker:
+        return ticker
+
+    # Stage 2: Zerodha name map for genuinely new stocks
+    norm = normalize_company_name(name)
+    ticker = name_map.get(norm)
+    if ticker:
+        print(f"  🔍 '{name}' → {ticker} (from Zerodha)")
+        return ticker
+
+    raise ValueError(
+        f"Could not resolve ticker for '{name}' (normalized: '{norm}', ISIN: {isin})"
+        " — add manually or check Zerodha instruments file."
+    )
+
+
+def parse_trades_with_claude(pdf_data, trade_date, supabase):
     """
     Pass the decrypted PDF directly to Claude as a document — avoids pdfplumber
     mangling the dense multi-column table. Claude reads the actual layout.
@@ -215,10 +253,10 @@ Return ONLY valid JSON, no markdown fences, no explanation:
     trades = result.get('trades', [])
     print(f"✅ Claude extracted {len(trades)} trades")
 
-    # Resolve tickers via Zerodha instruments — single download, authoritative symbols
-    isin_map = load_zerodha_isin_map()
+    # Stage 1: Supabase lookup (SELLs + repeat BUYs). Stage 2: Zerodha name map (new BUYs).
+    name_map = load_zerodha_name_map()
     for trade in trades:
-        trade['ticker'] = resolve_ticker_from_isin(trade['isin'], trade['name'], isin_map)
+        trade['ticker'] = resolve_ticker_from_isin(trade['isin'], trade['name'], name_map, supabase)
 
     return result
 
@@ -322,7 +360,7 @@ def main():
         decrypted = decrypt_pdf(pdf_data, HDFC_PDF_PASSWORD)
 
         # Step 4: Parse with Claude (PDF passed directly — no pdfplumber)
-        result = parse_trades_with_claude(decrypted, trade_date.strftime('%Y-%m-%d'))
+        result = parse_trades_with_claude(decrypted, trade_date.strftime('%Y-%m-%d'), supabase)
         trades = result.get('trades', [])
 
         if not trades:
