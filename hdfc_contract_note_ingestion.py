@@ -115,20 +115,25 @@ def decrypt_pdf(pdf_data, password):
 
 def load_zerodha_isin_map():
     """
-    Download Zerodha NSE instruments CSV (no auth required) and build ISIN → ticker map.
+    Download NSE equity master CSV (public, no auth) and build ISIN → ticker map.
+    Columns include: SYMBOL, SERIES, ISIN NUMBER
     Returns dict like {'INE263A01024': 'BEL.NS', ...}
     Called once per run — single HTTP request regardless of trade count.
     """
     import csv, io
-    url = "https://api.kite.trade/instruments/NSE"
-    resp = requests.get(url, timeout=15)
+    url = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    resp = requests.get(url, headers=headers, timeout=15)
     resp.raise_for_status()
     reader = csv.DictReader(io.StringIO(resp.text))
     isin_map = {}
     for row in reader:
-        if row.get('instrument_type') == 'EQ' and row.get('isin'):
-            isin_map[row['isin']] = row['tradingsymbol'] + '.NS'
-    print(f"✅ Loaded {len(isin_map):,} NSE instruments from Zerodha")
+        isin = row.get('ISIN NUMBER', '').strip()
+        symbol = row.get(' SYMBOL', row.get('SYMBOL', '')).strip()
+        series = row.get(' SERIES', row.get('SERIES', '')).strip()
+        if isin and symbol and series == 'EQ':
+            isin_map[isin] = symbol + '.NS'
+    print(f"✅ Loaded {len(isin_map):,} NSE instruments from NSE equity master")
     return isin_map
 
 
