@@ -12,7 +12,6 @@ import tempfile
 import datetime
 import anthropic
 import pikepdf
-import pdfplumber
 import requests
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -114,86 +113,93 @@ def decrypt_pdf(pdf_data, password):
     return decrypted_data
 
 
-def extract_text_from_pdf(pdf_data):
-    """Extract text from first 3 pages of PDF (equity cash segment)."""
-    import re
-
-    def clean_doubled_chars(text):
-        """Fix HDFC PDF artifact where page 2 sometimes has doubled characters e.g. VVOODDAAFFOONNEE."""
-        if re.search(r'(.)\1{3,}', text):  # 4+ repeated chars = doubled text artifact
-            return re.sub(r'(.)\1', r'\1', text)
-        return text
-
-    with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-        tmp.write(pdf_data)
-        tmp_path = tmp.name
-
-    extracted_pages = []
-    with pdfplumber.open(tmp_path) as pdf:
-        for i, page in enumerate(pdf.pages[:3]):
-            text = page.extract_text()
-            if text:
-                text = clean_doubled_chars(text)
-                extracted_pages.append(f"--- PAGE {i+1} ---\n{text}")
-
-    os.unlink(tmp_path)
-    full_text = '\n\n'.join(extracted_pages)
-    print(f"✅ Extracted {len(full_text):,} characters from PDF")
-    return full_text
+def load_zerodha_isin_map():
+    """
+    Download Zerodha NSE instruments CSV (no auth required) and build ISIN → ticker map.
+    Returns dict like {'INE263A01024': 'BEL.NS', ...}
+    Called once per run — single HTTP request regardless of trade count.
+    """
+    import csv, io
+    url = "https://api.kite.trade/instruments/NSE"
+    resp = requests.get(url, timeout=15)
+    resp.raise_for_status()
+    reader = csv.DictReader(io.StringIO(resp.text))
+    isin_map = {}
+    for row in reader:
+        if row.get('instrument_type') == 'EQ' and row.get('isin'):
+            isin_map[row['isin']] = row['tradingsymbol'] + '.NS'
+    print(f"✅ Loaded {len(isin_map):,} NSE instruments from Zerodha")
+    return isin_map
 
 
-def parse_trades_with_claude(pdf_text, trade_date):
-    """Use Claude API to extract structured trade data from PDF text."""
+def resolve_ticker_from_isin(isin, name, isin_map):
+    """Look up NSE ticker from pre-loaded Zerodha instruments map."""
+    ticker = isin_map.get(isin)
+    if not ticker:
+        raise ValueError(f"ISIN {isin} ({name}) not found in Zerodha instruments — add manually.")
+    print(f"  🔍 ISIN {isin} → {ticker}")
+    return ticker
+
+
+def parse_trades_with_claude(pdf_data, trade_date):
+    """
+    Pass the decrypted PDF directly to Claude as a document — avoids pdfplumber
+    mangling the dense multi-column table. Claude reads the actual layout.
+    Extracts ISIN + quantities + WAP prices only; ticker resolved separately via ISIN.
+    """
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    pdf_b64 = base64.standard_b64encode(pdf_data).decode('utf-8')
 
-    prompt = f"""You are parsing an HDFC Securities contract note PDF for trade date {trade_date}.
+    prompt = f"""This is an HDFC Securities contract note PDF for trade date {trade_date}.
 
-Extract all equity cash segment trades from this text. The table has columns:
-- ISIN
-- Security Name / Symbol (truncated, multi-line, with NSE/BSE symbol appended)
-- BUY Quantity (0 = no buy on this day)
-- BUY WAP (Weighted Average Price)
-- SELL Quantity (0 = no sell on this day)  
-- SELL WAP
+Look at the Equity (Cash) Segment table. It has these columns (left to right):
+ISIN | Security Name | Total BUY qty | BUY WAP | BUY Brokerage/share | Total BUY Value | Total SELL qty | SELL WAP | SELL Brokerage/share | Total SELL Value | Net Qty | Net Obligation
 
-Rules:
-1. Only include rows where BUY Quantity > 0 OR SELL Quantity > 0
-2. For the ticker: use the NSE/BSE symbol embedded at end of the security name
-   - If exchange is NSE, append .NS (e.g. AVANTI.NS)
-   - If exchange is BSE, append .BO
-   - The symbol code at end of name (e.g. SOFEQ, COCHINS, DFEREQ) is the NSE/BSE symbol
-   - Clean up the symbol: remove EQ suffix, remove Q suffix for NSE cash
-   - Common mappings: INDIGOEQ → INDIGO.NS, IDECELEQ → IDEA.NS
-3. Use WAP (Weighted Average Price) as the price — not the per-share brokerage
-4. Trade date is: {trade_date}
+Extract every row where Total BUY qty > 0 OR Total SELL qty > 0.
 
-Return ONLY valid JSON, no other text:
+CRITICAL:
+1. Quantity = "Total BUY qty traded across exchanges" for buys, "Total SELL qty traded across exchanges" for sells. NOT Net Qty.
+2. Price = WAP (Weighted Average Price), the column immediately after the quantity. NOT the brokerage/share (tiny number like 0.09 or 0.44).
+3. Name = full company name only, strip any trailing exchange suffix (EEQ, STEEQ, EQ, etc.).
+4. Leave ticker as empty string "" — do not guess it.
+5. If a row has both BUY qty > 0 and SELL qty > 0, emit two separate trade objects.
+
+Return ONLY valid JSON, no markdown fences, no explanation:
 {{
   "trade_date": "{trade_date}",
   "trades": [
     {{
-      "isin": "INE005B01027",
-      "name": "AVANTEL LIMITED",
-      "ticker": "AVANTI.NS",
-      "type": "BUY" or "SELL",
-      "quantity": 5500,
-      "price": 120.67,
-      "exchange": "NSE" or "BSE"
+      "isin": "INE263A01024",
+      "name": "BHARAT ELECTRONICS LTD",
+      "ticker": "",
+      "type": "SELL",
+      "quantity": 3000,
+      "price": 442.15,
+      "exchange": "NSE"
     }}
   ]
-}}
-
-PDF TEXT:
-{pdf_text}"""
+}}"""
 
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": pdf_b64
+                    }
+                },
+                {"type": "text", "text": prompt}
+            ]
+        }]
     )
 
     raw = response.content[0].text.strip()
-    # Strip markdown fences if present
     if raw.startswith('```'):
         raw = raw.split('```')[1]
         if raw.startswith('json'):
@@ -201,7 +207,14 @@ PDF TEXT:
     raw = raw.strip()
 
     result = json.loads(raw)
-    print(f"✅ Claude extracted {len(result.get('trades', []))} trades")
+    trades = result.get('trades', [])
+    print(f"✅ Claude extracted {len(trades)} trades")
+
+    # Resolve tickers via Zerodha instruments — single download, authoritative symbols
+    isin_map = load_zerodha_isin_map()
+    for trade in trades:
+        trade['ticker'] = resolve_ticker_from_isin(trade['isin'], trade['name'], isin_map)
+
     return result
 
 
@@ -303,11 +316,8 @@ def main():
         # Step 3: Decrypt PDF
         decrypted = decrypt_pdf(pdf_data, HDFC_PDF_PASSWORD)
 
-        # Step 4: Extract text
-        pdf_text = extract_text_from_pdf(decrypted)
-
-        # Step 5: Parse with Claude
-        result = parse_trades_with_claude(pdf_text, trade_date.strftime('%Y-%m-%d'))
+        # Step 4: Parse with Claude (PDF passed directly — no pdfplumber)
+        result = parse_trades_with_claude(decrypted, trade_date.strftime('%Y-%m-%d'))
         trades = result.get('trades', [])
 
         if not trades:
