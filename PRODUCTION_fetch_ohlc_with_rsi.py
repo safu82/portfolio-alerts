@@ -9,6 +9,7 @@ Features:
 - Fetches weekly OHLC data (52 weeks)
 - Calculates Weekly RSI(14) and RSI EMA(9)
 - Calculates EMAs (20, 50, 200)
+- Calculates 52-week high (rolling 252-day high)
 - Stores everything in Supabase
 
 Schedule: Daily at 4:30 PM IST (after market close)
@@ -207,7 +208,7 @@ def get_instrument_token(kite: KiteConnect, yahoo_ticker: str) -> tuple:
         symbol = yahoo_ticker.replace('.BO', '')
     else:
         return None, None
-    
+
     # Check special mappings
     for zerodha_sym, yahoo_sym in TICKER_MAPPING.items():
         if yahoo_ticker == yahoo_sym:
@@ -215,7 +216,7 @@ def get_instrument_token(kite: KiteConnect, yahoo_ticker: str) -> tuple:
             if yahoo_sym in ['GENUSPOWER.NS', 'DENTAWATER.NS']:
                 exchange = 'BSE'
             break
-    
+
     # Get instruments list (cached)
     if not hasattr(get_instrument_token, 'instruments'):
         print("📥 Downloading instruments from Zerodha...")
@@ -223,14 +224,14 @@ def get_instrument_token(kite: KiteConnect, yahoo_ticker: str) -> tuple:
         bse_instruments = kite.instruments("BSE")
         get_instrument_token.instruments = nse_instruments + bse_instruments
         print(f"✅ Loaded {len(get_instrument_token.instruments)} instruments")
-    
+
     # Find instrument
     for inst in get_instrument_token.instruments:
-        if (inst['tradingsymbol'] == symbol and 
-            inst['exchange'] == exchange and 
+        if (inst['tradingsymbol'] == symbol and
+            inst['exchange'] == exchange and
             inst['instrument_type'] == 'EQ'):
             return inst['instrument_token'], exchange
-    
+
     return None, None
 
 def init_supabase() -> Client:
@@ -239,65 +240,70 @@ def init_supabase() -> Client:
 
 def fetch_and_calculate_ohlc(kite: KiteConnect, yahoo_ticker: str) -> list:
     """
-    Fetch OHLC data from Zerodha and calculate RSI indicators
-    Returns list of records with OHLC + RSI data
+    Fetch OHLC data from Zerodha and calculate RSI indicators + 52W high.
+    Returns list of records with OHLC + RSI + 52W high data.
     """
     try:
         # Get instrument token
         instrument_token, exchange = get_instrument_token(kite, yahoo_ticker)
-        
+
         if not instrument_token:
             print(f"  ⚠️  Could not find instrument for {yahoo_ticker}")
             return []
-        
+
         # Fetch historical data from Zerodha
         to_date = datetime.now()
         from_date = to_date - timedelta(days=DAYS_HISTORY)
-        
+
         historical_data = kite.historical_data(
             instrument_token=instrument_token,
             from_date=from_date,
             to_date=to_date,
             interval='day'
         )
-        
+
         if not historical_data or len(historical_data) < 20:
             return []
-        
+
         # Convert to DataFrame
         df = pd.DataFrame(historical_data)
         df['date'] = pd.to_datetime(df['date'])
         df.set_index('date', inplace=True)
-        
+
         # Rename columns to match our convention
-        df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 
+        df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low',
                           'close': 'Close', 'volume': 'Volume'}, inplace=True)
-        
+
         # Calculate Daily RSI
         df['rsi_14'] = calculate_rsi(df['Close'], 14)
         df['rsi_ema_9'] = calculate_ema(df['rsi_14'], 9)
-        
+
         # Calculate EMAs
         df['ema_20'] = calculate_ema(df['Close'], 20)
         df['ema_50'] = calculate_ema(df['Close'], 50)
         df['ema_200'] = calculate_ema(df['Close'], 200)
-        
+
+        # 52-week high (rolling 252-day high of the High column)
+        # Uses all 365 days fetched from Zerodha — accurate for most of the year.
+        # min_periods=1 ensures early rows get a value rather than NaN.
+        df['high_52w'] = df['High'].rolling(window=252, min_periods=1).max()
+
         # Resample to weekly for weekly RSI
         weekly_df = resample_to_weekly(df)
         if len(weekly_df) >= 14:
             weekly_df['weekly_rsi_14'] = calculate_rsi(weekly_df['Close'], 14)
             weekly_df['weekly_rsi_ema_9'] = calculate_ema(weekly_df['weekly_rsi_14'], 9)
-            
+
             # Map weekly values back to daily dates
             df['weekly_rsi_14'] = np.nan
             df['weekly_rsi_ema_9'] = np.nan
-            
+
             for date, row in weekly_df.iterrows():
                 week_start = date - pd.Timedelta(days=6)
                 week_mask = (df.index >= week_start) & (df.index <= date)
                 df.loc[week_mask, 'weekly_rsi_14'] = row['weekly_rsi_14']
                 df.loc[week_mask, 'weekly_rsi_ema_9'] = row['weekly_rsi_ema_9']
-        
+
         # Convert to records for Supabase
         records = []
         for date, row in df.iterrows():
@@ -315,12 +321,13 @@ def fetch_and_calculate_ohlc(kite: KiteConnect, yahoo_ticker: str) -> list:
                 'ema_50': float(row['ema_50']) if pd.notna(row['ema_50']) else None,
                 'ema_200': float(row['ema_200']) if pd.notna(row['ema_200']) else None,
                 'weekly_rsi_14': float(row['weekly_rsi_14']) if pd.notna(row['weekly_rsi_14']) else None,
-                'weekly_rsi_ema_9': float(row['weekly_rsi_ema_9']) if pd.notna(row['weekly_rsi_ema_9']) else None
+                'weekly_rsi_ema_9': float(row['weekly_rsi_ema_9']) if pd.notna(row['weekly_rsi_ema_9']) else None,
+                'high_52w': float(row['high_52w']) if pd.notna(row['high_52w']) else None,
             }
             records.append(record)
-        
+
         return records
-        
+
     except Exception as e:
         print(f"  ⚠️  Error fetching {yahoo_ticker}: {e}")
         return []
@@ -344,37 +351,37 @@ def main():
     print("📊 ZERODHA OHLC + RSI DATA FETCHER")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
-    
+
     # Get access token from Supabase
     print("\n🔑 Fetching Zerodha access token from Supabase...")
     access_token = get_access_token_from_supabase()
-    
+
     if not access_token:
         print("❌ No access token found! Exiting.")
         return
-    
+
     print(f"✅ Token loaded: {access_token[:20]}...")
-    
+
     # Initialize Kite
     kite = KiteConnect(api_key=ZERODHA_API_KEY)
     kite.set_access_token(access_token)
     print("✅ Connected to Zerodha API\n")
-    
+
     # Initialize Supabase
     supabase = init_supabase()
-    
+
     total_records = 0
     successful = 0
     failed = 0
-    
+
     for i, ticker in enumerate(NIFTY_500_TICKERS, 1):
         # Progress indicator
         if i % 10 == 0 or i == 1:
             print(f"\n[{i}/{len(NIFTY_500_TICKERS)}] Progress: {(i/len(NIFTY_500_TICKERS)*100):.1f}%")
-        
+
         # Fetch and calculate
         records = fetch_and_calculate_ohlc(kite, ticker)
-        
+
         if records:
             # Upsert to Supabase
             try:
@@ -382,29 +389,30 @@ def main():
                     records,
                     on_conflict='ticker,snapshot_date'
                 ).execute()
-                
+
                 total_records += len(records)
                 successful += 1
-                
+
                 # Show sample values
                 latest = records[-1]
                 rsi_info = f"RSI: {latest['rsi_ema_9']:.1f}" if latest['rsi_ema_9'] else "RSI: N/A"
                 ema_info = f"EMA200: ₹{latest['ema_200']:.2f}" if latest['ema_200'] else "EMA200: N/A"
-                print(f"  ✅ {ticker:20} - {len(records)} records | {rsi_info} | {ema_info}")
-                
+                h52_info = f"52W High: ₹{latest['high_52w']:.2f}" if latest['high_52w'] else "52W High: N/A"
+                print(f"  ✅ {ticker:20} - {len(records)} records | {rsi_info} | {ema_info} | {h52_info}")
+
             except Exception as e:
                 failed += 1
                 print(f"  ❌ {ticker:20} - DB error: {e}")
         else:
             failed += 1
-        
+
         # Rate limiting (60 requests/minute)
         time.sleep(RATE_LIMIT_DELAY)
-    
+
     # Cleanup old data
     print("\n" + "=" * 80)
     cleanup_old_data(supabase, days_to_keep=60)
-    
+
     # Summary
     print("\n" + "=" * 80)
     print("📈 SUMMARY")
@@ -413,7 +421,7 @@ def main():
     print(f"❌ Failed: {failed}/{len(NIFTY_500_TICKERS)}")
     print(f"💾 Total records: {total_records:,}")
     print(f"📊 Data source: Zerodha API")
-    print(f"📈 Indicators: RSI(14), RSI EMA(9), EMAs(20,50,200), Weekly RSI")
+    print(f"📈 Indicators: RSI(14), RSI EMA(9), EMAs(20,50,200), Weekly RSI, 52W High")
     print(f"Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
 
