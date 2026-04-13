@@ -1,0 +1,30 @@
+name: Weekly Market Cap Update
+
+on:
+  schedule:
+    - cron: '30 0 * * 0'  # Sundays at 6:00 AM IST (00:30 UTC)
+  workflow_dispatch:       # Allow manual trigger
+
+jobs:
+  update-market-caps:
+    name: Update Market Caps
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install yfinance supabase --break-system-packages || pip install yfinance supabase
+
+      - name: Run market cap updater
+        run: python update_market_caps.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
