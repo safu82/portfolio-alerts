@@ -6,7 +6,7 @@ Scans for: Narrow CPR, Blue Zone, Golden Cross (with ADX), MACD (with ADX),
 
 UPDATED (April 2026):
 - Narrow CPR: < 0.3% width, within 0.5% of L3, volume > 1.2x
-- Blue Zone: RSI EMA(9) > 60, pullback 5-10%, volume > 1.5x (Strong only)
+- Blue Zone: RSI EMA(9) >= 65/72 daily, >= 55/65 weekly (lowered from 70/75 and 60/70)
 - Golden Cross: 20×50 EMA cross, ADX > 25 + +DI > -DI required for Strong Buy
 - MACD: Bullish crossover, ADX > 25 for Strong Buy, ADX > 20 for Buy (raised from no minimum)
 - Darvas Box: Tight consolidation near 52W high, volume breakout (NEW - Portfolio A)
@@ -203,8 +203,13 @@ def check_narrow_cpr_signal(daily_df: pd.DataFrame, current_price: float) -> Opt
 def check_blue_zone_signal(daily_df: pd.DataFrame, current_price: float) -> Optional[Dict]:
     """
     Blue Zone momentum signal.
-    Strong Buy: Daily RSI EMA(9) >= 75, Weekly RSI EMA(9) >= 70, near 52W high, above EMA50, volume > 1.5x.
-    Buy: Daily RSI EMA(9) >= 70, Weekly RSI EMA(9) >= 60, near 52W high, above EMA20.
+
+    UPDATED THRESHOLDS (April 2026):
+    Strong Buy: Daily RSI EMA(9) >= 72, Weekly RSI EMA(9) >= 65, near 52W high, above EMA50, volume > 1.5x.
+    Buy:        Daily RSI EMA(9) >= 65, Weekly RSI EMA(9) >= 55, near 52W high, above EMA20.
+
+    Lowered from 75/70 and 70/60 to account for structurally lower RSI levels
+    in correcting/sideways markets while preserving the signal's quality intent.
     """
     if len(daily_df) < 50:
         return None
@@ -218,7 +223,11 @@ def check_blue_zone_signal(daily_df: pd.DataFrame, current_price: float) -> Opti
         if pd.isna(daily_rsi_ema_9) or pd.isna(weekly_rsi_ema_9):
             return None
 
-        high_52w = daily_df['high'].tail(252).max()
+        # Use stored high_52w if available, fall back to rolling max of available data
+        high_52w = latest.get('high_52w')
+        if pd.isna(high_52w) or high_52w is None:
+            high_52w = daily_df['high'].max()
+
         distance_from_52w_high = ((current_price - high_52w) / high_52w) * 100
         if distance_from_52w_high < -10:
             return None
@@ -228,11 +237,11 @@ def check_blue_zone_signal(daily_df: pd.DataFrame, current_price: float) -> Opti
         above_ema_50 = current_price > ema_50 if pd.notna(ema_50) else False
         above_ema_20 = current_price > ema_20 if pd.notna(ema_20) else False
 
-        if (daily_rsi_ema_9 >= 75 and weekly_rsi_ema_9 >= 70 and
+        if (daily_rsi_ema_9 >= 72 and weekly_rsi_ema_9 >= 65 and
                 above_ema_50 and volume_ratio > 1.5):
             signal_strength = 'strong'
             signal_type = 'blue_zone_strong'
-        elif (daily_rsi_ema_9 >= 70 and weekly_rsi_ema_9 >= 60 and above_ema_20):
+        elif (daily_rsi_ema_9 >= 65 and weekly_rsi_ema_9 >= 55 and above_ema_20):
             signal_strength = 'regular'
             signal_type = 'blue_zone_buy'
         else:
@@ -424,7 +433,10 @@ def check_darvas_box(daily_df: pd.DataFrame, current_price: float) -> Optional[D
         if pd.isna(ema_50) or current_close <= ema_50:
             return None
 
-        high_52w = daily_df['high'].tail(252).max()
+        # Use stored high_52w if available, fall back to rolling max of available data
+        high_52w = latest.get('high_52w')
+        if pd.isna(high_52w) or high_52w is None:
+            high_52w = daily_df['high'].max()
 
         box_found = False
         box_top = box_bottom = box_duration = None
