@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """
-PRODUCTION: Zerodha OHLC Data Fetcher with RSI Calculations
+PRODUCTION: Zerodha OHLC Data Fetcher with RSI Calculations + Alkalyme RS
 Fetches OHLC data from Zerodha API and calculates RSI indicators for storage in Supabase
 
 Features:
 - Fetches daily OHLC data from Zerodha (365 days)
+- Fetches NIFTY 50 index data separately (instrument_type = INDICES)
 - Calculates Daily RSI(14) and RSI EMA(9)
 - Fetches weekly OHLC data (52 weeks)
 - Calculates Weekly RSI(14) and RSI EMA(9)
 - Calculates EMAs (20, 50, 200)
 - Calculates 52-week high (rolling 252-day high)
+- Calculates Alkalyme RS score (Portfolio A formula):
+    Step 1: RS Ratio = (Stock Close / NIFTY 50 Close) * 1000
+    Step 2: Wilder RSI(14) of RS Ratio series (SMA-seeded)
+    Step 3: 9-period EMA of the RSI values = alkalyme_rs
 - Stores everything in Supabase
 
 Schedule: Daily at 4:30 PM IST (after market close)
-Runtime: ~10-15 minutes for 511 stocks (Zerodha rate limit: 60 req/min)
+Runtime: ~10-15 minutes for 520 stocks (Zerodha rate limit: 60 req/min)
 """
 
 from kiteconnect import KiteConnect
@@ -28,24 +33,21 @@ import os
 # CONFIGURATION
 # =============================================================================
 
-# Read from environment variables (set by GitHub Actions)
 SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://hcgyncghmcvylnrmcivj.supabase.co')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjZ3luY2dobWN2eWxucm1jaXZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc1MTQwMTEsImV4cCI6MjA3MzA5MDAxMX0.n8vFVCJe1y_3o8fpAY0IgasZ4eKl7DAogEM3OlHB8Ww')
 ZERODHA_API_KEY = os.getenv('ZERODHA_API_KEY', 'a0yteflg4n33wu49')
 
-DAYS_HISTORY = 365  # 1 year of data for reliable 200 EMA
-RATE_LIMIT_DELAY = 1.0  # 60 requests/minute = 1 second between requests
+DAYS_HISTORY = 365
+RATE_LIMIT_DELAY = 1.0
 
-# Ticker mappings (Yahoo format to Zerodha format)
 TICKER_MAPPING = {
     'KPENERGY.NS': 'KPEL',
     'TRIL.NS': 'TARIL',
-    'GENUSPOWER.NS': 'GENUSPOWER',  # BSE
-    'DENTAWATER.NS': 'DENTA',  # BSE
-    'NARMP.BO': 'NARMP'  # BSE
+    'GENUSPOWER.NS': 'GENUSPOWER',
+    'DENTAWATER.NS': 'DENTA',
+    'NARMP.BO': 'NARMP'
 }
 
-# Nifty 500 tickers (497 stocks) + Portfolio stocks (23 stocks) = 520 total
 NIFTY_500_TICKERS = [
     'DELHIVERY.NS', 'CASTROLIND.NS', 'SARDAEN.NS', 'GODIGIT.NS', 'PNCINFRA.NS',
     'AEGISLOG.NS', 'WELCORP.NS', 'IDEA.NS', '360ONE.NS', 'SAPPHIRE.NS', 'ASTRAL.NS',
@@ -141,16 +143,16 @@ NIFTY_500_TICKERS = [
     'GAEL.NS', 'POLICYBZR.NS', 'BSE.NS', 'MCX.NS', 'AVANTIFEED.NS', 'GODFRYPHLP.NS',
     'COROMANDEL.NS', 'AKUMS.NS', 'AMBER.NS', 'LLOYDSME.NS', 'CGCL.NS', 'KAYNES.NS',
     'RAINBOW.NS', 'CHOLAHLDNG.NS', 'VIJAYA.NS', 'FIVESTAR.NS',
-    # Portfolio stocks NOT in Nifty 500 (19 stocks - UPDATED)
+    # Portfolio stocks NOT in Nifty 500
     'ASIANENE.NS', 'BELRISE.NS', 'DENTAWATER.NS', 'GENUSPOWER.NS',
     'GREAVESCOT.NS', 'INDRAMEDCO.NS', 'ITDC.NS', 'MANINFRA.NS',
     'NAVA.NS', 'NFL.NS', 'ORIENTELEC.NS', 'PSUBNKBEES.NS',
     'SOTL.NS', 'TAJGVK.NS',
-    # Additional portfolio stocks (ADDED - Feb 2026)
+    # Additional portfolio stocks (Feb 2026)
     'AVANTEL.NS', 'MODEFENCE.NS', 'WOCKPHARMA.NS', 'ZENTEC.NS',
-    # ETFs in portfolio (ADDED - Feb 2026)
+    # ETFs in portfolio (Feb 2026)
     'GOLDBEES.NS', 'METALIETF.NS', 'SILVERBEES.NS',
-    # BSE stocks in portfolio (ADDED - Feb 2026)
+    # BSE stocks in portfolio (Feb 2026)
     'NARMP.BO'
 ]
 
@@ -159,26 +161,127 @@ NIFTY_500_TICKERS = [
 # =============================================================================
 
 def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    """Calculate RSI indicator"""
+    """Standard RSI using rolling mean (for stock indicators)"""
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period, min_periods=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period, min_periods=period).mean()
     rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return 100 - (100 / (1 + rs))
+
+
+def calculate_wilder_rsi(series: pd.Series, period: int = 14) -> list:
+    """
+    Wilder RSI with proper SMA seeding — used for Alkalyme RS formula.
+    Matches Portfolio A audit document Section 5.2 exactly.
+    Returns list of floats (None for warmup period).
+    """
+    values = series.tolist()
+    n = len(values)
+    rsi_values = [None] * n
+
+    if n < period + 1:
+        return rsi_values
+
+    # Seed: SMA of first 14 gains and losses
+    gains = []
+    losses = []
+    for i in range(1, period + 1):
+        delta = values[i] - values[i - 1]
+        gains.append(max(delta, 0))
+        losses.append(max(-delta, 0))
+
+    avg_gain = sum(gains) / period
+    avg_loss = sum(losses) / period
+
+    if avg_loss == 0:
+        rsi_values[period] = 100.0
+    else:
+        rs = avg_gain / avg_loss
+        rsi_values[period] = 100 - (100 / (1 + rs))
+
+    # Wilder smoothing for subsequent values
+    for i in range(period + 1, n):
+        delta = values[i] - values[i - 1]
+        gain = max(delta, 0)
+        loss = max(-delta, 0)
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+        if avg_loss == 0:
+            rsi_values[i] = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi_values[i] = 100 - (100 / (1 + rs))
+
+    return rsi_values
+
+
+def calculate_alkalyme_rs(stock_closes: pd.Series,
+                          nifty_closes: pd.Series) -> list:
+    """
+    Alkalyme RS score per Portfolio A audit document Section 5.
+    Step 1: RS Ratio = (Stock Close / NIFTY 50 Close) * 1000
+    Step 2: Wilder RSI(14) of RS Ratio series (SMA-seeded)
+    Step 3: 9-period EMA of RSI values (SMA-seeded) = alkalyme_rs
+
+    Returns list of floats aligned to stock_closes index (None for warmup).
+    """
+    # Align on common dates
+    combined = pd.DataFrame({
+        'stock': stock_closes,
+        'nifty': nifty_closes
+    }).dropna()
+
+    if len(combined) < 25:  # Need at least 14 + 9 + 2 periods
+        return [None] * len(stock_closes)
+
+    # Step 1: RS Ratio
+    rs_ratio = (combined['stock'] / combined['nifty']) * 1000
+
+    # Step 2: Wilder RSI(14) of RS Ratio
+    rsi_values = calculate_wilder_rsi(rs_ratio, period=14)
+
+    # Step 3: 9-period EMA of RSI values (SMA-seeded per audit doc Section 5.3)
+    non_none = [(i, v) for i, v in enumerate(rsi_values) if v is not None]
+    if len(non_none) < 9:
+        ema_values = [None] * len(rsi_values)
+    else:
+        ema_values = [None] * len(rsi_values)
+        # Find first 9 non-None values to seed EMA
+        seed_indices = [i for i, v in non_none[:9]]
+        seed_vals = [v for i, v in non_none[:9]]
+        seed_ema = sum(seed_vals) / 9
+        ema_values[seed_indices[-1]] = seed_ema
+
+        k = 2 / (9 + 1)  # = 0.2
+        prev_ema = seed_ema
+        for i in range(seed_indices[-1] + 1, len(rsi_values)):
+            if rsi_values[i] is not None:
+                prev_ema = rsi_values[i] * k + prev_ema * (1 - k)
+                ema_values[i] = prev_ema
+
+    # Map back to original stock_closes index using combined's dates
+    result = [None] * len(stock_closes)
+    combined_dates = list(combined.index)
+    stock_dates = list(stock_closes.index)
+
+    for i, ema_val in enumerate(ema_values):
+        if i < len(combined_dates) and ema_val is not None:
+            combined_date = combined_dates[i]
+            if combined_date in stock_dates:
+                stock_idx = stock_dates.index(combined_date)
+                result[stock_idx] = ema_val
+
+    return result
+
 
 def calculate_ema(series: pd.Series, period: int) -> pd.Series:
-    """Calculate Exponential Moving Average"""
     return series.ewm(span=period, adjust=False, min_periods=period).mean()
 
+
 def resample_to_weekly(df: pd.DataFrame) -> pd.DataFrame:
-    """Resample daily data to weekly (Friday close)"""
     weekly = df.resample('W-FRI').agg({
-        'Open': 'first',
-        'High': 'max',
-        'Low': 'min',
-        'Close': 'last',
-        'Volume': 'sum'
+        'Open': 'first', 'High': 'max', 'Low': 'min',
+        'Close': 'last', 'Volume': 'sum'
     })
     return weekly.dropna()
 
@@ -187,19 +290,111 @@ def resample_to_weekly(df: pd.DataFrame) -> pd.DataFrame:
 # =============================================================================
 
 def get_access_token_from_supabase() -> str:
-    """Fetch the latest access token from Supabase"""
     try:
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        result = supabase.table('zerodha_config').select('value').eq('id', 'zerodha_access_token').single().execute()
+        result = supabase.table('zerodha_config').select('value')\
+            .eq('id', 'zerodha_access_token').single().execute()
         if result.data:
             return result.data['value']
     except Exception as e:
-        print(f"❌ Error fetching token from Supabase: {e}")
+        print(f"❌ Error fetching token: {e}")
     return None
 
+
+def get_nifty50_instrument_token(kite: KiteConnect) -> int:
+    """
+    Fetch NIFTY 50 index instrument token.
+    Index instruments use instrument_type = 'INDICES', not 'EQ'.
+    """
+    if not hasattr(get_nifty50_instrument_token, 'token'):
+        instruments = kite.instruments("NSE")
+        for inst in instruments:
+            if (inst['tradingsymbol'] == 'NIFTY 50' and
+                    inst['instrument_type'] == 'INDICES'):
+                get_nifty50_instrument_token.token = inst['instrument_token']
+                print(f"✅ NIFTY 50 token: {inst['instrument_token']}")
+                return inst['instrument_token']
+        print("⚠️  NIFTY 50 index not found in instruments")
+        get_nifty50_instrument_token.token = None
+    return get_nifty50_instrument_token.token
+
+
+def fetch_nifty50_closes(kite: KiteConnect) -> pd.Series:
+    """
+    Fetch NIFTY 50 index OHLC and return a date-indexed Close series.
+    Also stores NIFTY 50 in daily_stock_snapshots as NIFTY50.NS.
+    """
+    token = get_nifty50_instrument_token(kite)
+    if not token:
+        return pd.Series(dtype=float)
+
+    try:
+        to_date = datetime.now()
+        from_date = to_date - timedelta(days=DAYS_HISTORY)
+
+        data = kite.historical_data(
+            instrument_token=token,
+            from_date=from_date,
+            to_date=to_date,
+            interval='day'
+        )
+
+        if not data:
+            return pd.Series(dtype=float)
+
+        df = pd.DataFrame(data)
+        df['date'] = pd.to_datetime(df['date'])
+        df.set_index('date', inplace=True)
+        df.index = df.index.normalize()  # strip time component
+
+        print(f"  ✅ NIFTY 50: {len(df)} days fetched")
+        return df['close']
+
+    except Exception as e:
+        print(f"  ⚠️  Error fetching NIFTY 50: {e}")
+        return pd.Series(dtype=float)
+
+
+def save_nifty50_to_supabase(kite: KiteConnect, supabase: Client):
+    """Store NIFTY 50 OHLC in daily_stock_snapshots as NIFTY50.NS"""
+    token = get_nifty50_instrument_token(kite)
+    if not token:
+        return
+
+    try:
+        to_date = datetime.now()
+        from_date = to_date - timedelta(days=DAYS_HISTORY)
+        data = kite.historical_data(
+            instrument_token=token,
+            from_date=from_date,
+            to_date=to_date,
+            interval='day'
+        )
+
+        records = []
+        for row in data:
+            records.append({
+                'ticker': 'NIFTY50.NS',
+                'snapshot_date': row['date'].strftime('%Y-%m-%d')
+                    if hasattr(row['date'], 'strftime') else str(row['date'])[:10],
+                'open': float(row['open']),
+                'high': float(row['high']),
+                'low': float(row['low']),
+                'close': float(row['close']),
+                'volume': int(row.get('volume', 0)),
+            })
+
+        if records:
+            supabase.table('daily_stock_snapshots').upsert(
+                records, on_conflict='ticker,snapshot_date'
+            ).execute()
+            print(f"  ✅ NIFTY50.NS: {len(records)} records saved")
+
+    except Exception as e:
+        print(f"  ⚠️  Error saving NIFTY 50: {e}")
+
+
 def get_instrument_token(kite: KiteConnect, yahoo_ticker: str) -> tuple:
-    """Get Zerodha instrument token from Yahoo ticker"""
-    # Convert Yahoo ticker to Zerodha format
     if yahoo_ticker.endswith('.NS'):
         exchange = 'NSE'
         symbol = yahoo_ticker.replace('.NS', '')
@@ -209,7 +404,6 @@ def get_instrument_token(kite: KiteConnect, yahoo_ticker: str) -> tuple:
     else:
         return None, None
 
-    # Check special mappings
     for zerodha_sym, yahoo_sym in TICKER_MAPPING.items():
         if yahoo_ticker == yahoo_sym:
             symbol = zerodha_sym.split('.')[0]
@@ -217,7 +411,6 @@ def get_instrument_token(kite: KiteConnect, yahoo_ticker: str) -> tuple:
                 exchange = 'BSE'
             break
 
-    # Get instruments list (cached)
     if not hasattr(get_instrument_token, 'instruments'):
         print("📥 Downloading instruments from Zerodha...")
         nse_instruments = kite.instruments("NSE")
@@ -225,33 +418,31 @@ def get_instrument_token(kite: KiteConnect, yahoo_ticker: str) -> tuple:
         get_instrument_token.instruments = nse_instruments + bse_instruments
         print(f"✅ Loaded {len(get_instrument_token.instruments)} instruments")
 
-    # Find instrument
     for inst in get_instrument_token.instruments:
         if (inst['tradingsymbol'] == symbol and
-            inst['exchange'] == exchange and
-            inst['instrument_type'] == 'EQ'):
+                inst['exchange'] == exchange and
+                inst['instrument_type'] == 'EQ'):
             return inst['instrument_token'], exchange
 
     return None, None
 
+
 def init_supabase() -> Client:
-    """Initialize Supabase client"""
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
-def fetch_and_calculate_ohlc(kite: KiteConnect, yahoo_ticker: str) -> list:
+
+def fetch_and_calculate_ohlc(kite: KiteConnect, yahoo_ticker: str,
+                              nifty_closes: pd.Series) -> list:
     """
-    Fetch OHLC data from Zerodha and calculate RSI indicators + 52W high.
-    Returns list of records with OHLC + RSI + 52W high data.
+    Fetch OHLC + calculate all indicators including Alkalyme RS.
+    nifty_closes: date-indexed Series of NIFTY 50 closes for RS computation.
     """
     try:
-        # Get instrument token
         instrument_token, exchange = get_instrument_token(kite, yahoo_ticker)
-
         if not instrument_token:
             print(f"  ⚠️  Could not find instrument for {yahoo_ticker}")
             return []
 
-        # Fetch historical data from Zerodha
         to_date = datetime.now()
         from_date = to_date - timedelta(days=DAYS_HISTORY)
 
@@ -265,49 +456,49 @@ def fetch_and_calculate_ohlc(kite: KiteConnect, yahoo_ticker: str) -> list:
         if not historical_data or len(historical_data) < 20:
             return []
 
-        # Convert to DataFrame
         df = pd.DataFrame(historical_data)
         df['date'] = pd.to_datetime(df['date'])
         df.set_index('date', inplace=True)
-
-        # Rename columns to match our convention
+        df.index = df.index.normalize()
         df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low',
-                          'close': 'Close', 'volume': 'Volume'}, inplace=True)
+                            'close': 'Close', 'volume': 'Volume'}, inplace=True)
 
-        # Calculate Daily RSI
+        # Daily RSI
         df['rsi_14'] = calculate_rsi(df['Close'], 14)
         df['rsi_ema_9'] = calculate_ema(df['rsi_14'], 9)
 
-        # Calculate EMAs
+        # EMAs
         df['ema_20'] = calculate_ema(df['Close'], 20)
         df['ema_50'] = calculate_ema(df['Close'], 50)
         df['ema_200'] = calculate_ema(df['Close'], 200)
 
-        # 52-week high (rolling 252-day high of the High column)
-        # Uses all 365 days fetched from Zerodha — accurate for most of the year.
-        # min_periods=1 ensures early rows get a value rather than NaN.
+        # 52-week high
         df['high_52w'] = df['High'].rolling(window=252, min_periods=1).max()
 
-        # Resample to weekly for weekly RSI
+        # Alkalyme RS — computed against NIFTY 50
+        if len(nifty_closes) >= 25:
+            rs_list = calculate_alkalyme_rs(df['Close'], nifty_closes)
+            df['alkalyme_rs'] = rs_list
+        else:
+            df['alkalyme_rs'] = None
+
+        # Weekly RSI
         weekly_df = resample_to_weekly(df)
         if len(weekly_df) >= 14:
             weekly_df['weekly_rsi_14'] = calculate_rsi(weekly_df['Close'], 14)
             weekly_df['weekly_rsi_ema_9'] = calculate_ema(weekly_df['weekly_rsi_14'], 9)
-
-            # Map weekly values back to daily dates
             df['weekly_rsi_14'] = np.nan
             df['weekly_rsi_ema_9'] = np.nan
-
             for date, row in weekly_df.iterrows():
                 week_start = date - pd.Timedelta(days=6)
                 week_mask = (df.index >= week_start) & (df.index <= date)
                 df.loc[week_mask, 'weekly_rsi_14'] = row['weekly_rsi_14']
                 df.loc[week_mask, 'weekly_rsi_ema_9'] = row['weekly_rsi_ema_9']
 
-        # Convert to records for Supabase
+        # Build records
         records = []
         for date, row in df.iterrows():
-            record = {
+            records.append({
                 'ticker': yahoo_ticker,
                 'snapshot_date': date.strftime('%Y-%m-%d'),
                 'open': float(row['Open']),
@@ -323,8 +514,8 @@ def fetch_and_calculate_ohlc(kite: KiteConnect, yahoo_ticker: str) -> list:
                 'weekly_rsi_14': float(row['weekly_rsi_14']) if pd.notna(row['weekly_rsi_14']) else None,
                 'weekly_rsi_ema_9': float(row['weekly_rsi_ema_9']) if pd.notna(row['weekly_rsi_ema_9']) else None,
                 'high_52w': float(row['high_52w']) if pd.notna(row['high_52w']) else None,
-            }
-            records.append(record)
+                'alkalyme_rs': float(row['alkalyme_rs']) if pd.notna(row['alkalyme_rs']) else None,
+            })
 
         return records
 
@@ -332,73 +523,72 @@ def fetch_and_calculate_ohlc(kite: KiteConnect, yahoo_ticker: str) -> list:
         print(f"  ⚠️  Error fetching {yahoo_ticker}: {e}")
         return []
 
+
 def cleanup_old_data(supabase: Client, days_to_keep: int = 60):
-    """Delete data older than specified days"""
     try:
         cutoff_date = (datetime.now() - timedelta(days=days_to_keep)).strftime('%Y-%m-%d')
         response = supabase.table('daily_stock_snapshots')\
-            .delete()\
-            .lt('snapshot_date', cutoff_date)\
-            .execute()
+            .delete().lt('snapshot_date', cutoff_date).execute()
         deleted = len(response.data) if response.data else 0
         print(f"🗑️  Cleaned up {deleted:,} old records (before {cutoff_date})")
     except Exception as e:
         print(f"⚠️  Cleanup error: {e}")
 
+
 def main():
-    """Main execution"""
     print("=" * 80)
-    print("📊 ZERODHA OHLC + RSI DATA FETCHER")
+    print("📊 ZERODHA OHLC + RSI + ALKALYME RS DATA FETCHER")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
 
-    # Get access token from Supabase
-    print("\n🔑 Fetching Zerodha access token from Supabase...")
+    print("\n🔑 Fetching Zerodha access token...")
     access_token = get_access_token_from_supabase()
-
     if not access_token:
         print("❌ No access token found! Exiting.")
         return
-
     print(f"✅ Token loaded: {access_token[:20]}...")
 
-    # Initialize Kite
     kite = KiteConnect(api_key=ZERODHA_API_KEY)
     kite.set_access_token(access_token)
     print("✅ Connected to Zerodha API\n")
 
-    # Initialize Supabase
     supabase = init_supabase()
 
+    # ── Fetch NIFTY 50 first — needed for Alkalyme RS ──────────────────────
+    print("📈 Fetching NIFTY 50 index data...")
+    save_nifty50_to_supabase(kite, supabase)
+    nifty_closes = fetch_nifty50_closes(kite)
+    time.sleep(RATE_LIMIT_DELAY)
+
+    if nifty_closes.empty:
+        print("⚠️  NIFTY 50 data unavailable — Alkalyme RS will be skipped")
+    else:
+        print(f"✅ NIFTY 50 loaded: {len(nifty_closes)} days\n")
+
+    # ── Main fetch loop ─────────────────────────────────────────────────────
     total_records = 0
     successful = 0
     failed = 0
 
     for i, ticker in enumerate(NIFTY_500_TICKERS, 1):
-        # Progress indicator
         if i % 10 == 0 or i == 1:
             print(f"\n[{i}/{len(NIFTY_500_TICKERS)}] Progress: {(i/len(NIFTY_500_TICKERS)*100):.1f}%")
 
-        # Fetch and calculate
-        records = fetch_and_calculate_ohlc(kite, ticker)
+        records = fetch_and_calculate_ohlc(kite, ticker, nifty_closes)
 
         if records:
-            # Upsert to Supabase
             try:
                 supabase.table('daily_stock_snapshots').upsert(
-                    records,
-                    on_conflict='ticker,snapshot_date'
+                    records, on_conflict='ticker,snapshot_date'
                 ).execute()
 
                 total_records += len(records)
                 successful += 1
 
-                # Show sample values
                 latest = records[-1]
                 rsi_info = f"RSI: {latest['rsi_ema_9']:.1f}" if latest['rsi_ema_9'] else "RSI: N/A"
-                ema_info = f"EMA200: ₹{latest['ema_200']:.2f}" if latest['ema_200'] else "EMA200: N/A"
-                h52_info = f"52W High: ₹{latest['high_52w']:.2f}" if latest['high_52w'] else "52W High: N/A"
-                print(f"  ✅ {ticker:20} - {len(records)} records | {rsi_info} | {ema_info} | {h52_info}")
+                rs_info = f"RS: {latest['alkalyme_rs']:.1f}" if latest['alkalyme_rs'] else "RS: N/A"
+                print(f"  ✅ {ticker:20} - {len(records)} records | {rsi_info} | {rs_info}")
 
             except Exception as e:
                 failed += 1
@@ -406,24 +596,21 @@ def main():
         else:
             failed += 1
 
-        # Rate limiting (60 requests/minute)
         time.sleep(RATE_LIMIT_DELAY)
 
-    # Cleanup old data
     print("\n" + "=" * 80)
     cleanup_old_data(supabase, days_to_keep=60)
 
-    # Summary
     print("\n" + "=" * 80)
     print("📈 SUMMARY")
     print("=" * 80)
     print(f"✅ Successful: {successful}/{len(NIFTY_500_TICKERS)}")
-    print(f"❌ Failed: {failed}/{len(NIFTY_500_TICKERS)}")
+    print(f"❌ Failed:     {failed}/{len(NIFTY_500_TICKERS)}")
     print(f"💾 Total records: {total_records:,}")
-    print(f"📊 Data source: Zerodha API")
-    print(f"📈 Indicators: RSI(14), RSI EMA(9), EMAs(20,50,200), Weekly RSI, 52W High")
+    print(f"📊 Indicators: RSI(14), RSI EMA(9), EMAs(20,50,200), Weekly RSI, 52W High, Alkalyme RS")
     print(f"Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
+
 
 if __name__ == "__main__":
     main()
