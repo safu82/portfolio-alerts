@@ -557,7 +557,12 @@ def check_pullback_bounce(daily_df: pd.DataFrame, current_price: float) -> Optio
 # ============================================
 
 def scan_stock(supabase: Client, ticker: str) -> List[Dict]:
-    """Scan a single stock for all active signals."""
+    """
+    Scan a single stock for all active signals.
+    Applies Alkalyme RS rank filter (top 25% = rank <= 125) per Portfolio A.
+    Exception: Darvas Box is NOT exempt (only 3-C is exempt in Portfolio A,
+    and we haven't implemented 3-C yet).
+    """
     try:
         daily_df = fetch_stock_data_from_supabase(supabase, ticker, days=365)
         if daily_df is None or len(daily_df) < 60:
@@ -565,6 +570,13 @@ def scan_stock(supabase: Client, ticker: str) -> List[Dict]:
 
         current_price = daily_df.iloc[-1]['close']
         stock_name = get_stock_name(ticker)
+
+        # ── Alkalyme RS rank filter ───────────────────────────────────────
+        # Only run signals if stock is in top 25% by RS rank (rank 1-125)
+        # rs_rank = None means data not yet available — allow through
+        rs_rank = daily_df.iloc[-1].get('rs_rank')
+        in_top_25_pct = (rs_rank is None or pd.isna(rs_rank) or int(rs_rank) <= 125)
+
         signals = []
 
         checks = [
@@ -577,11 +589,16 @@ def scan_stock(supabase: Client, ticker: str) -> List[Dict]:
         ]
 
         for check_fn in checks:
+            # Skip RS filter for Narrow CPR (intraday, not a breakout pattern)
+            # All other patterns require top 25% RS rank
+            if not in_top_25_pct and check_fn != check_narrow_cpr_signal:
+                continue
             result = check_fn(daily_df, current_price)
             if result:
                 result['ticker'] = ticker
                 result['stock_name'] = stock_name
                 result['price'] = round(current_price, 2)
+                result['rs_rank'] = int(rs_rank) if rs_rank and not pd.isna(rs_rank) else None
                 signals.append(result)
 
         return signals
@@ -764,13 +781,14 @@ def main():
     print("=" * 80)
     print(f"✅ Stocks scanned: {len(tickers)}")
     print(f"\n📊 Signals Found:")
-    print(f"  📍 Narrow CPR:     {signal_counts['narrow_cpr_breakaway']}")
+    print(f"  📍 Narrow CPR:     {signal_counts['narrow_cpr_breakaway']} (no RS filter)")
     print(f"  🟢 Blue Zone:      {signal_counts['blue_zone_strong']} Strong + {signal_counts['blue_zone_buy']} Buy")
     print(f"  ⚡ Golden Cross:   {signal_counts['golden_cross_strong']} Strong + {signal_counts['golden_cross_buy']} Buy")
-    print(f"  📊 MACD:           {signal_counts['macd_strong']} Strong + {signal_counts['macd_buy']} Buy  (ADX>25 / ADX>20)")
+    print(f"  📊 MACD:           {signal_counts['macd_strong']} Strong + {signal_counts['macd_buy']} Buy")
     print(f"  📦 Darvas Box:     {signal_counts['darvas_box']}")
     print(f"  🔄 Pullback Bounce:{signal_counts['pullback_bounce']}")
     print(f"  📍 Total:          {len(all_signals)}")
+    print(f"  🔍 RS filter:      top 25% only (rank ≤ 125) — signals above are post-filter")
     print(f"\nCompleted: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
 
