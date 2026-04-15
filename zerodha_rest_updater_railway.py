@@ -38,12 +38,11 @@ TICKER_MAPPING = {
 # GDP config — update quarterly from MoSPI
 GDP_USD_BILLIONS = 3970  # FY 2025-26 First Advance Estimates
 
-# Hardcoded Zerodha instrument tokens for indices and currency
-# These tokens are permanent and never change
-INDEX_TOKENS = {
-    256265:   'NIFTY50.NS',    # NSE NIFTY 50 index
-    18808578: 'NIFTY500.NS',   # NSE NIFTY 500 index
-    408065:   'USDINR.NS',     # CDS USD/INR spot
+# Index instruments fetched by exchange:tradingsymbol (more reliable than raw tokens)
+# USDINR uses the near-month CDS futures as spot proxy
+INDEX_INSTRUMENTS = {
+    'NSE:NIFTY 50':  'NIFTY50.NS',
+    'NSE:NIFTY 500': 'NIFTY500.NS',
 }
 
 def get_access_token_from_supabase():
@@ -191,29 +190,20 @@ def fetch_and_update_prices(kite, token_to_ticker):
 
 def fetch_and_update_index_prices(kite):
     """
-    Fetch NIFTY 50, NIFTY 500, and USDINR from Zerodha using hardcoded tokens.
-    These are non-EQ instruments (indices + currency) so they can't go through
-    the normal instrument lookup flow. Called every price update cycle.
+    Fetch NIFTY 50 and NIFTY 500 from Zerodha using exchange:tradingsymbol format.
+    More reliable than raw instrument tokens.
     """
     try:
-        tokens = list(INDEX_TOKENS.keys())
-        quotes = kite.quote(tokens)
+        symbols = list(INDEX_INSTRUMENTS.keys())
+        quotes = kite.quote(symbols)
         if not quotes:
             return 0
 
         updates = []
         now = datetime.now(ist)
 
-        for token_str, quote_data in quotes.items():
-            token = int(token_str) if ':' not in str(token_str) else None
-            if token is None:
-                # Handle NSE:256265 format
-                try:
-                    token = int(str(token_str).split(':')[-1])
-                except:
-                    continue
-
-            ticker = INDEX_TOKENS.get(token)
+        for symbol, quote_data in quotes.items():
+            ticker = INDEX_INSTRUMENTS.get(symbol)
             if not ticker:
                 continue
 
