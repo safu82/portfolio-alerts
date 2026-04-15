@@ -38,6 +38,14 @@ TICKER_MAPPING = {
 # GDP config — update quarterly from MoSPI
 GDP_USD_BILLIONS = 3970  # FY 2025-26 First Advance Estimates
 
+# Hardcoded Zerodha instrument tokens for indices and currency
+# These tokens are permanent and never change
+INDEX_TOKENS = {
+    256265:   'NIFTY50.NS',    # NSE NIFTY 50 index
+    18808578: 'NIFTY500.NS',   # NSE NIFTY 500 index
+    408065:   'USDINR.NS',     # CDS USD/INR spot
+}
+
 def get_access_token_from_supabase():
     """Fetch the latest access token from Supabase (updated daily by GitHub Actions)"""
     try:
@@ -178,6 +186,62 @@ def fetch_and_update_prices(kite, token_to_ticker):
 
     except Exception as e:
         print(f"❌ Error fetching prices: {e}")
+        return 0
+
+
+def fetch_and_update_index_prices(kite):
+    """
+    Fetch NIFTY 50, NIFTY 500, and USDINR from Zerodha using hardcoded tokens.
+    These are non-EQ instruments (indices + currency) so they can't go through
+    the normal instrument lookup flow. Called every price update cycle.
+    """
+    try:
+        tokens = list(INDEX_TOKENS.keys())
+        quotes = kite.quote(tokens)
+        if not quotes:
+            return 0
+
+        updates = []
+        now = datetime.now(ist)
+
+        for token_str, quote_data in quotes.items():
+            token = int(token_str) if ':' not in str(token_str) else None
+            if token is None:
+                # Handle NSE:256265 format
+                try:
+                    token = int(str(token_str).split(':')[-1])
+                except:
+                    continue
+
+            ticker = INDEX_TOKENS.get(token)
+            if not ticker:
+                continue
+
+            last_price = quote_data.get('last_price', 0)
+            ohlc = quote_data.get('ohlc', {})
+            prev_close = ohlc.get('close', 0)
+
+            if last_price and prev_close:
+                day_change = last_price - prev_close
+                day_change_pct = (day_change / prev_close * 100) if prev_close > 0 else 0
+                updates.append({
+                    'ticker': ticker,
+                    'price': last_price,
+                    'day_change': day_change,
+                    'day_change_pct': day_change_pct,
+                    'prev_close': prev_close,
+                    'volume': quote_data.get('volume', 0),
+                    'updated_at': now.isoformat()
+                })
+
+        if updates:
+            supabase.table('live_prices').upsert(updates, on_conflict='ticker').execute()
+            return len(updates)
+
+        return 0
+
+    except Exception as e:
+        print(f"⚠️  Index price fetch error: {e}")
         return 0
 
 def fetch_and_store_market_cap():
@@ -328,6 +392,7 @@ def main():
             # ── Live price update ─────────────────────────────────────────
             if kite and token_to_ticker:
                 updated = fetch_and_update_prices(kite, token_to_ticker)
+                fetch_and_update_index_prices(kite)  # NIFTY 50, NIFTY 500, USDINR
                 update_count += 1
 
                 now = datetime.now(ist)
