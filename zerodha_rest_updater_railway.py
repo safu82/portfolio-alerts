@@ -39,10 +39,11 @@ TICKER_MAPPING = {
 GDP_USD_BILLIONS = 3970  # FY 2025-26 First Advance Estimates
 
 # Index instruments fetched by exchange:tradingsymbol (more reliable than raw tokens)
-# USDINR uses the near-month CDS futures as spot proxy
 INDEX_INSTRUMENTS = {
-    'NSE:NIFTY 50':  'NIFTY50.NS',
-    'NSE:NIFTY 500': 'NIFTY500.NS',
+    'NSE:NIFTY 50':          'NIFTY50.NS',
+    'NSE:NIFTY 500':         'NIFTY500.NS',
+    'NSE:NIFTY MIDCAP 100':  'NIFTYMIDCAP100.NS',
+    'NSE:NIFTY SMLCAP 100':  'NIFTYSMLCAP100.NS',
 }
 
 def get_access_token_from_supabase():
