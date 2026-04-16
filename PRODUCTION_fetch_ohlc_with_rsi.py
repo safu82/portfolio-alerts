@@ -303,20 +303,11 @@ def get_access_token_from_supabase() -> str:
 
 def get_nifty50_instrument_token(kite: KiteConnect) -> int:
     """
-    Fetch NIFTY 50 index instrument token.
-    Index instruments use instrument_type = 'INDICES', not 'EQ'.
+    Return NIFTY 50 index instrument token.
+    Token 256265 is the permanent Zerodha token for NSE:NIFTY 50.
+    Confirmed working via kite.quote('NSE:NIFTY 50').
     """
-    if not hasattr(get_nifty50_instrument_token, 'token'):
-        instruments = kite.instruments("NSE")
-        for inst in instruments:
-            if (inst['tradingsymbol'] == 'NIFTY 50' and
-                    inst['instrument_type'] == 'INDICES'):
-                get_nifty50_instrument_token.token = inst['instrument_token']
-                print(f"✅ NIFTY 50 token: {inst['instrument_token']}")
-                return inst['instrument_token']
-        print("⚠️  NIFTY 50 index not found in instruments")
-        get_nifty50_instrument_token.token = None
-    return get_nifty50_instrument_token.token
+    return 256265
 
 
 def fetch_nifty50_closes(kite: KiteConnect) -> pd.Series:
