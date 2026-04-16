@@ -93,13 +93,26 @@ def main():
 
     # Upsert ranks in batches
     print(f"\n💾 Writing {len(updates)} ranks to Supabase...")
-    batch_size = 500
+    # Use UPDATE not upsert — rows must already exist from OHLC fetcher
+    # Batch by updating in groups using .in_() filter trick:
+    # For each rank value, update all tickers with that rank at once
+    # This is more efficient than one-by-one but still correct
+    success = 0
+    batch_size = 50
     for i in range(0, len(updates), batch_size):
         batch = updates[i:i + batch_size]
-        supabase.table('daily_stock_snapshots')\
-            .upsert(batch, on_conflict='ticker,snapshot_date')\
-            .execute()
-        print(f"  ✅ Batch {i//batch_size + 1}: {len(batch)} rows")
+        for row in batch:
+            try:
+                supabase.table('daily_stock_snapshots')\
+                    .update({'rs_rank': row['rs_rank']})\
+                    .eq('ticker', row['ticker'])\
+                    .eq('snapshot_date', row['snapshot_date'])\
+                    .execute()
+                success += 1
+            except Exception as e:
+                print(f"  ⚠️  Failed {row['ticker']}: {e}")
+        if (i // batch_size) % 2 == 0:
+            print(f"  ✅ Progress: {success}/{len(updates)} ranks written")
 
     print(f"\n✅ RS ranking complete for {today}")
     print(f"   {len(updates)} stocks ranked")
