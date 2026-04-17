@@ -650,8 +650,15 @@ def save_signals_to_supabase(supabase: Client, signals: List[Dict]) -> bool:
             })
 
         print(f"💾 Inserting {len(records)} signals...")
-        supabase.table('entry_signals').insert(records).execute()
-        print(f"✅ Successfully saved {len(records)} signals")
+        success, failed = 0, 0
+        for record in records:
+            try:
+                supabase.table('entry_signals').insert(record).execute()
+                success += 1
+            except Exception as row_err:
+                print(f"  ⚠️  Skipped {record.get('ticker')} ({record.get('signal_type')}): {row_err}")
+                failed += 1
+        print(f"✅ Saved {success} signals" + (f", skipped {failed}" if failed else ""))
         return True
 
     except Exception as e:
@@ -688,6 +695,17 @@ def main():
 
     latest_date = latest_response.data[0]['snapshot_date']
     print(f"  Using latest date: {latest_date}")
+
+    # ── Stale data guard ──────────────────────────────────────────────────────
+    # If latest snapshot is not today, warn. This happens when the OHLC fetcher
+    # runs before Zerodha has finalized today's historical candle.
+    today_str = str(datetime.now().date())
+    if latest_date != today_str:
+        print(f"\n⚠️  WARNING: Latest snapshot date ({latest_date}) is NOT today ({today_str}).")
+        print(f"   Zerodha may not have finalized today's historical data yet.")
+        print(f"   Scanning with {latest_date} data — signals will use yesterday's prices.")
+        print(f"   Consider running this workflow later (5:30 PM IST minimum).\n")
+    # ─────────────────────────────────────────────────────────────────────────
 
     all_tickers = []
     offset = 0
