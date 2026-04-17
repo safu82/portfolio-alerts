@@ -149,7 +149,9 @@ def get_yfinance_data(ticker_ns):
             qi = tk.quarterly_income_stmt
             if qf is not None and not qf.empty:
                 fin = qi if (qi is not None and not qi.empty) else qf
-                cols = list(fin.columns[:6])  # last 6 quarters
+                # Sort columns descending (newest first) then take 8 quarters
+                fin = fin.sort_index(axis=1, ascending=False)
+                cols = list(fin.columns[:8])
                 for col in cols:
                     q_label = col.strftime('%b %Y') if hasattr(col, 'strftime') else str(col)
                     rev = fin.loc['Total Revenue', col] if 'Total Revenue' in fin.index else None
@@ -274,21 +276,24 @@ def get_screener_data(ticker_ns):
                 table = pl_section.find('table')
                 if table:
                     headers = [th.get_text(strip=True) for th in table.find_all('th')]
-                    # Headers are quarter labels (e.g. "Mar 2024")
-                    quarter_labels = headers[1:]  # skip first "row label" column
+                    # Screener shows oldest on left, newest on right — take rightmost 8, reverse to newest-first
+                    quarter_labels = headers[1:]
+                    recent_labels = list(reversed(quarter_labels[-8:]))
 
                     def get_row(row_label):
                         for tr in table.find_all('tr'):
                             cells = tr.find_all('td')
                             if cells and row_label.lower() in cells[0].get_text(strip=True).lower():
-                                return [parse_number(c.get_text(strip=True)) for c in cells[1:]]
+                                vals = [parse_number(c.get_text(strip=True)) for c in cells[1:]]
+                                # Reverse to match newest-first label order
+                                return list(reversed(vals[-8:]))
                         return []
 
                     revenues  = get_row('sales')
                     net_profs = get_row('net profit')
                     eps_rows  = get_row('eps')
 
-                    for i, q in enumerate(quarter_labels[:6]):
+                    for i, q in enumerate(recent_labels):
                         entry = {'quarter': q}
                         if i < len(revenues):  entry['revenue_cr']    = revenues[i]
                         if i < len(net_profs): entry['net_income_cr'] = net_profs[i]
