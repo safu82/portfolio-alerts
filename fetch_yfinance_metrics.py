@@ -115,8 +115,8 @@ def _compute_price_metrics(highs, closes):
 # ── Batch fetch metadata ───────────────────────────────────────────────────────
 def fetch_metadata_batch(tickers_batch):
     """
-    Fetch beta, market cap, PE TTM for a batch.
-    Returns dict: ticker -> {beta, market_cap_cr, pe_ttm}
+    Fetch beta, market cap, PE TTM and valuation ratios for a batch.
+    Returns dict: ticker -> metrics
     """
     results = {}
     try:
@@ -125,12 +125,30 @@ def fetch_metadata_batch(tickers_batch):
             try:
                 info = tks.tickers[ticker].info or {}
                 mcap = info.get('marketCap')
+                # Margins from yfinance are 0-1 decimals, convert to %
+                def pct(v):
+                    s = _safe(v)
+                    return round(s * 100, 2) if s is not None and abs(s) <= 1 else s
                 results[ticker] = {
-                    'beta':         _safe(info.get('beta')),
-                    'market_cap_cr': round(mcap / 1e7, 2) if mcap else None,
-                    'pe_ttm':       _safe(info.get('trailingPE')),
-                    'eps_ttm':      _safe(info.get('trailingEps')),
+                    'beta':              _safe(info.get('beta')),
+                    'market_cap_cr':     round(mcap / 1e7, 2) if mcap else None,
+                    'pe_ttm':            _safe(info.get('trailingPE')),
+                    'eps_ttm':           _safe(info.get('trailingEps')),
+                    'price_to_book':     _safe(info.get('priceToBook')),
+                    'price_to_sales':    _safe(info.get('priceToSalesTrailing12Months')),
+                    'ev_to_ebitda':      _safe(info.get('enterpriseToEbitda')),
+                    'roe':               pct(info.get('returnOnEquity')),
+                    'net_margin':        pct(info.get('profitMargins')),
+                    'ebitda_margin':     pct(info.get('ebitdaMargins')),
+                    'gross_margin':      pct(info.get('grossMargins')),
+                    'debt_to_equity':    _safe(info.get('debtToEquity')),
+                    'dividend_yield':    pct(info.get('dividendYield')),
+                    'book_value_per_share': _safe(info.get('bookValue')),
+                    'revenue_growth_yoy':   pct(info.get('revenueGrowth')),
+                    'earnings_growth_yoy':  pct(info.get('earningsGrowth')),
                 }
+                # Remove None values
+                results[ticker] = {k: v for k, v in results[ticker].items() if v is not None}
             except Exception:
                 pass
     except Exception as e:
