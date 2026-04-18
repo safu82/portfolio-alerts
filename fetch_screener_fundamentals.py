@@ -89,14 +89,22 @@ def scrape_screener(ticker_ns):
                               if li.find('span', class_='name')]
                 if not hasattr(scrape_screener, '_labels_printed'):
                     print(f'    📋 Screener ratio labels: {all_labels}')
+                    # Also print raw HTML of first few lis to debug value structure
+                    for li in ratios.find_all('li')[:3]:
+                        print(f'    🔍 LI HTML: {str(li)[:200]}')
                     scrape_screener._labels_printed = True
                 for li in ratios.find_all('li'):
                     lbl = li.find('span', class_='name')
-                    val = li.find('span', class_='nowrap') or li.find('span', class_='number')
-                    if not lbl or not val:
+                    if not lbl:
                         continue
                     label = lbl.get_text(strip=True).lower()
-                    v = parse_num(val.get_text(strip=True))
+                    # Get value — try multiple span classes, then fall back to full li text
+                    val_el = (li.find('span', class_='nowrap') or 
+                              li.find('span', class_='number') or
+                              li.find('span', class_='value'))
+                    # Some Screener values are just text nodes after the label span
+                    raw_text = val_el.get_text(strip=True) if val_el else li.get_text(strip=True).replace(lbl.get_text(strip=True), '').strip()
+                    v = parse_num(raw_text)
                     if v is None:
                         continue
                     if 'stock p/e' in label or label == 'p/e':
@@ -183,6 +191,56 @@ def scrape_screener(ticker_ns):
                         if len(pe_vals) >= 4:
                             result['pe_3yr_avg'] = round(sum(pe_vals) / len(pe_vals), 1)
                     break
+
+            # ── Compute ROCE and ROE from profit-loss + balance-sheet ─────────
+            try:
+                def get_table_row(section_id, row_label):
+                    """Get latest (last) numeric value for a row in a section table."""
+                    sec = soup.find('section', id=section_id)
+                    if not sec: return None
+                    tbl = sec.find('table')
+                    if not tbl: return None
+                    for tr in tbl.find_all('tr'):
+                        cells = tr.find_all(['td', 'th'])
+                        if not cells: continue
+                        if row_label.lower() in cells[0].get_text(strip=True).lower():
+                            # Get last non-empty numeric value
+                            for cell in reversed(cells[1:]):
+                                v = parse_num(cell.get_text(strip=True))
+                                if v is not None:
+                                    return v
+                    return None
+
+                # ROCE = (Operating Profit + Other Income) / Capital Employed × 100
+                # Capital Employed = Total Assets - Other Liabilities (current liabilities)
+                op_profit    = get_table_row('profit-loss', 'operating profit')
+                other_income = get_table_row('profit-loss', 'other income')
+                total_assets = get_table_row('balance-sheet', 'total assets')
+                other_liab   = get_table_row('balance-sheet', 'other liabilities')
+                if op_profit and total_assets and other_liab:
+                    ebit = op_profit + (other_income or 0)
+                    capital_employed = total_assets - other_liab
+                    if capital_employed > 0:
+                        result['roce'] = round(ebit / capital_employed * 100, 1)
+
+                # ROE = Net Profit / Shareholders Equity × 100
+                # Shareholders Equity = Equity Capital + Reserves
+                net_profit    = get_table_row('profit-loss', 'net profit')
+                equity_cap    = get_table_row('balance-sheet', 'equity capital')
+                reserves      = get_table_row('balance-sheet', 'reserves')
+                if net_profit and equity_cap is not None and reserves is not None:
+                    equity = equity_cap + reserves
+                    if equity > 0:
+                        result['roe'] = round(net_profit / equity * 100, 1)
+
+                # Net Margin = Net Profit / Sales × 100
+                sales = get_table_row('profit-loss', 'sales')
+                if net_profit and sales and sales > 0:
+                    result.setdefault('net_margin', round(net_profit / sales * 100, 1) / 100)
+                # Note: EPS is captured per-quarter from the quarters table — not overriding here
+
+            except Exception as e:
+                print(f'    ⚠️  ROCE/ROE compute error: {e}')
 
             result['source_screener'] = True
             return result
