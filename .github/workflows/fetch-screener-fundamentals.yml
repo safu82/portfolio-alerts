@@ -1,0 +1,29 @@
+name: Weekly Screener Fundamentals
+
+on:
+  schedule:
+    - cron: '30 1 * * 6'    # Saturday 7:00 AM IST (01:30 UTC)
+  workflow_dispatch:          # Manual trigger anytime
+
+jobs:
+  screener-fundamentals:
+    name: Scrape Screener.in for all 500 stocks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60       # Allow up to 60 min; ~450 stocks × 3s = ~25 min
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4 supabase
+
+      - name: Run Screener fetcher
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python fetch_screener_fundamentals.py
