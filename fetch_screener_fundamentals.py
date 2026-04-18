@@ -147,16 +147,18 @@ def scrape_screener(ticker_ns):
                                 return list(reversed(vals[-8:]))
                         return []
 
-                    revenues  = get_row('sales')
-                    net_profs = get_row('net profit')
-                    eps_vals  = get_row('eps')
+                    revenues    = get_row('sales')
+                    net_profs   = get_row('net profit')
+                    eps_vals    = get_row('eps')
+                    ebitda_vals = get_row('operating profit')  # Screener calls it "Operating Profit"
 
                     quarterly = []
                     for i, q in enumerate(q_labels):
                         entry = {'quarter': q}
-                        if i < len(revenues)  and revenues[i]  is not None: entry['revenue_cr']    = revenues[i]
-                        if i < len(net_profs) and net_profs[i] is not None: entry['net_income_cr'] = net_profs[i]
-                        if i < len(eps_vals)  and eps_vals[i]  is not None: entry['eps']           = eps_vals[i]
+                        if i < len(revenues)    and revenues[i]    is not None: entry['revenue_cr']    = revenues[i]
+                        if i < len(net_profs)   and net_profs[i]   is not None: entry['net_income_cr'] = net_profs[i]
+                        if i < len(eps_vals)    and eps_vals[i]    is not None: entry['eps']           = eps_vals[i]
+                        if i < len(ebitda_vals) and ebitda_vals[i] is not None: entry['ebitda_cr']     = ebitda_vals[i]
                         quarterly.append(entry)
 
                     if quarterly:
