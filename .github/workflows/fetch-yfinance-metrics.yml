@@ -1,0 +1,30 @@
+name: Fetch YFinance Metrics (ATH + Beta + Returns)
+
+on:
+  schedule:
+    - cron: '0 13 * * 1-5'   # 6:30 PM IST (13:00 UTC), Mon-Fri
+                               # Runs after OHLC (5:30 PM) and scanner (6:00 PM)
+  workflow_dispatch:           # Manual trigger anytime
+
+jobs:
+  fetch-yfinance:
+    name: Fetch ATH, Beta, Market Cap, Returns
+    runs-on: ubuntu-latest
+    timeout-minutes: 20        # Should complete in ~5-8 min, kill if hanging
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance supabase pandas numpy
+
+      - name: Run fetcher
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python fetch_yfinance_metrics.py
