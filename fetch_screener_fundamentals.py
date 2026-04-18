@@ -83,6 +83,13 @@ def scrape_screener(ticker_ns):
             # ── Key ratios ────────────────────────────────────────────────────
             ratios = soup.find('section', id='top-ratios')
             if ratios:
+                # Debug: print all labels for first stock only
+                all_labels = [li.find('span', class_='name').get_text(strip=True) 
+                              for li in ratios.find_all('li') 
+                              if li.find('span', class_='name')]
+                if not hasattr(scrape_screener, '_labels_printed'):
+                    print(f'    📋 Screener ratio labels: {all_labels}')
+                    scrape_screener._labels_printed = True
                 for li in ratios.find_all('li'):
                     lbl = li.find('span', class_='name')
                     val = li.find('span', class_='nowrap') or li.find('span', class_='number')
@@ -92,15 +99,15 @@ def scrape_screener(ticker_ns):
                     v = parse_num(val.get_text(strip=True))
                     if v is None:
                         continue
-                    if 'stock p/e' in label:
+                    if 'stock p/e' in label or label == 'p/e':
                         result.setdefault('pe_ttm', v)
-                    elif 'return on equity' in label or label == 'roe':
+                    elif 'return on equity' in label or 'roe' in label:
                         result['roe'] = v
-                    elif 'roce' in label:
+                    elif 'roce' in label or 'return on capital' in label:
                         result['roce'] = v
-                    elif 'debt / equity' in label:
+                    elif 'debt / equity' in label or 'debt/equity' in label:
                         result['debt_to_equity'] = v
-                    elif 'net profit margin' in label or 'net profit %' in label:
+                    elif 'net profit margin' in label or 'net profit %' in label or 'net margin' in label:
                         result['net_margin'] = v / 100 if v > 1 else v
                     elif 'dividend yield' in label:
                         result['dividend_yield'] = v / 100 if v > 1 else v
@@ -108,6 +115,8 @@ def scrape_screener(ticker_ns):
                         result['book_value_per_share'] = v
                     elif label.startswith('eps') and 'eps_ttm' not in result:
                         result['eps_ttm'] = v
+                    elif 'opm' in label or 'operating profit margin' in label:
+                        result['ebitda_margin'] = v / 100 if v > 1 else v
 
             # ── Shareholding ──────────────────────────────────────────────────
             sh = soup.find('section', id='shareholding')
