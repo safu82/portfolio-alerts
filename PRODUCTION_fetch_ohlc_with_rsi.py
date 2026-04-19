@@ -466,6 +466,10 @@ def fetch_and_calculate_ohlc(kite: KiteConnect, yahoo_ticker: str,
         # 52-week high
         df['high_52w'] = df['High'].rolling(window=252, min_periods=1).max()
 
+        # Volume ratio — today's volume vs 20-day average
+        df['vol_20_avg'] = df['Volume'].shift(1).rolling(window=20, min_periods=5).mean()
+        df['vol_ratio'] = (df['Volume'] / df['vol_20_avg']).round(2)
+
         # Alkalyme RS — computed against NIFTY 50
         if len(nifty_closes) >= 25:
             rs_list = calculate_alkalyme_rs(df['Close'], nifty_closes)
@@ -506,6 +510,7 @@ def fetch_and_calculate_ohlc(kite: KiteConnect, yahoo_ticker: str,
                 'weekly_rsi_ema_9': float(row['weekly_rsi_ema_9']) if pd.notna(row['weekly_rsi_ema_9']) else None,
                 'high_52w': float(row['high_52w']) if pd.notna(row['high_52w']) else None,
                 'alkalyme_rs': float(row['alkalyme_rs']) if pd.notna(row['alkalyme_rs']) else None,
+                'vol_ratio': float(row['vol_ratio']) if pd.notna(row['vol_ratio']) else None,
             })
 
         return records
