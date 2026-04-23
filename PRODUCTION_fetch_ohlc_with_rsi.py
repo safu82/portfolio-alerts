@@ -15,7 +15,7 @@ Features:
     Step 1: RS Ratio = (Stock Close / NIFTY 50 Close) * 1000
     Step 2: Wilder RSI(14) of RS Ratio series (SMA-seeded)
     Step 3: 9-period EMA of the RSI values = alkalyme_rs
-- Stores everything in Supabase
+- Stores everything in Supabase (both daily_stock_snapshots and historical_snapshots)
 
 Schedule: Daily at 4:30 PM IST (after market close)
 Runtime: ~10-15 minutes for 520 stocks (Zerodha rate limit: 60 req/min)
@@ -203,7 +203,6 @@ def calculate_wilder_rsi(series: pd.Series, period: int = 14) -> list:
     if n < period + 1:
         return rsi_values
 
-    # Seed: SMA of first 14 gains and losses
     gains = []
     losses = []
     for i in range(1, period + 1):
@@ -220,7 +219,6 @@ def calculate_wilder_rsi(series: pd.Series, period: int = 14) -> list:
         rs = avg_gain / avg_loss
         rsi_values[period] = 100 - (100 / (1 + rs))
 
-    # Wilder smoothing for subsequent values
     for i in range(period + 1, n):
         delta = values[i] - values[i - 1]
         gain = max(delta, 0)
@@ -243,44 +241,35 @@ def calculate_alkalyme_rs(stock_closes: pd.Series,
     Step 1: RS Ratio = (Stock Close / NIFTY 50 Close) * 1000
     Step 2: Wilder RSI(14) of RS Ratio series (SMA-seeded)
     Step 3: 9-period EMA of RSI values (SMA-seeded) = alkalyme_rs
-
-    Returns list of floats aligned to stock_closes index (None for warmup).
     """
-    # Align on common dates
     combined = pd.DataFrame({
         'stock': stock_closes,
         'nifty': nifty_closes
     }).dropna()
 
-    if len(combined) < 25:  # Need at least 14 + 9 + 2 periods
+    if len(combined) < 25:
         return [None] * len(stock_closes)
 
-    # Step 1: RS Ratio
     rs_ratio = (combined['stock'] / combined['nifty']) * 1000
-
-    # Step 2: Wilder RSI(14) of RS Ratio
     rsi_values = calculate_wilder_rsi(rs_ratio, period=14)
 
-    # Step 3: 9-period EMA of RSI values (SMA-seeded per audit doc Section 5.3)
     non_none = [(i, v) for i, v in enumerate(rsi_values) if v is not None]
     if len(non_none) < 9:
         ema_values = [None] * len(rsi_values)
     else:
         ema_values = [None] * len(rsi_values)
-        # Find first 9 non-None values to seed EMA
         seed_indices = [i for i, v in non_none[:9]]
         seed_vals = [v for i, v in non_none[:9]]
         seed_ema = sum(seed_vals) / 9
         ema_values[seed_indices[-1]] = seed_ema
 
-        k = 2 / (9 + 1)  # = 0.2
+        k = 2 / (9 + 1)
         prev_ema = seed_ema
         for i in range(seed_indices[-1] + 1, len(rsi_values)):
             if rsi_values[i] is not None:
                 prev_ema = rsi_values[i] * k + prev_ema * (1 - k)
                 ema_values[i] = prev_ema
 
-    # Map back to original stock_closes index using combined's dates
     result = [None] * len(stock_closes)
     combined_dates = list(combined.index)
     stock_dates = list(stock_closes.index)
@@ -323,19 +312,10 @@ def get_access_token_from_supabase() -> str:
 
 
 def get_nifty50_instrument_token(kite: KiteConnect) -> int:
-    """
-    Return NIFTY 50 index instrument token.
-    Token 256265 is the permanent Zerodha token for NSE:NIFTY 50.
-    Confirmed working via kite.quote('NSE:NIFTY 50').
-    """
     return 256265
 
 
 def fetch_nifty50_closes(kite: KiteConnect) -> pd.Series:
-    """
-    Fetch NIFTY 50 index OHLC and return a date-indexed Close series.
-    Also stores NIFTY 50 in daily_stock_snapshots as NIFTY50.NS.
-    """
     token = get_nifty50_instrument_token(kite)
     if not token:
         return pd.Series(dtype=float)
@@ -357,7 +337,7 @@ def fetch_nifty50_closes(kite: KiteConnect) -> pd.Series:
         df = pd.DataFrame(data)
         df['date'] = pd.to_datetime(df['date'])
         df.set_index('date', inplace=True)
-        df.index = df.index.normalize()  # strip time component
+        df.index = df.index.normalize()
 
         print(f"  ✅ NIFTY 50: {len(df)} days fetched")
         return df['close']
@@ -368,7 +348,7 @@ def fetch_nifty50_closes(kite: KiteConnect) -> pd.Series:
 
 
 def save_nifty50_to_supabase(kite: KiteConnect, supabase: Client):
-    """Store NIFTY 50 OHLC in daily_stock_snapshots as NIFTY50.NS"""
+    """Store NIFTY 50 OHLC in both daily_stock_snapshots and historical_snapshots"""
     token = get_nifty50_instrument_token(kite)
     if not token:
         return
@@ -397,10 +377,17 @@ def save_nifty50_to_supabase(kite: KiteConnect, supabase: Client):
             })
 
         if records:
+            # Write to live table (60-day retention)
             supabase.table('daily_stock_snapshots').upsert(
                 records, on_conflict='ticker,snapshot_date'
             ).execute()
-            print(f"  ✅ NIFTY50.NS: {len(records)} records saved")
+
+            # Also write to historical table (no retention limit)
+            supabase.table('historical_snapshots').upsert(
+                records, on_conflict='ticker,snapshot_date'
+            ).execute()
+
+            print(f"  ✅ NIFTY50.NS: {len(records)} records saved to both tables")
 
     except Exception as e:
         print(f"  ⚠️  Error saving NIFTY 50: {e}")
@@ -447,7 +434,6 @@ def fetch_and_calculate_ohlc(kite: KiteConnect, yahoo_ticker: str,
                               nifty_closes: pd.Series) -> list:
     """
     Fetch OHLC + calculate all indicators including Alkalyme RS.
-    nifty_closes: date-indexed Series of NIFTY 50 closes for RS computation.
     """
     try:
         instrument_token, exchange = get_instrument_token(kite, yahoo_ticker)
@@ -487,11 +473,11 @@ def fetch_and_calculate_ohlc(kite: KiteConnect, yahoo_ticker: str,
         # 52-week high
         df['high_52w'] = df['High'].rolling(window=252, min_periods=1).max()
 
-        # Volume ratio — today's volume vs 20-day average
+        # Volume ratio
         df['vol_20_avg'] = df['Volume'].shift(1).rolling(window=20, min_periods=5).mean()
         df['vol_ratio'] = (df['Volume'] / df['vol_20_avg']).round(2)
 
-        # Alkalyme RS — computed against NIFTY 50
+        # Alkalyme RS
         if len(nifty_closes) >= 25:
             rs_list = calculate_alkalyme_rs(df['Close'], nifty_closes)
             df['alkalyme_rs'] = rs_list
@@ -542,12 +528,13 @@ def fetch_and_calculate_ohlc(kite: KiteConnect, yahoo_ticker: str,
 
 
 def cleanup_old_data(supabase: Client, days_to_keep: int = 60):
+    """Clean up old records from daily_stock_snapshots only (not historical_snapshots)"""
     try:
         cutoff_date = (datetime.now() - timedelta(days=days_to_keep)).strftime('%Y-%m-%d')
         response = supabase.table('daily_stock_snapshots')\
             .delete().lt('snapshot_date', cutoff_date).execute()
         deleted = len(response.data) if response.data else 0
-        print(f"🗑️  Cleaned up {deleted:,} old records (before {cutoff_date})")
+        print(f"🗑️  Cleaned up {deleted:,} old records from daily_stock_snapshots (before {cutoff_date})")
     except Exception as e:
         print(f"⚠️  Cleanup error: {e}")
 
@@ -595,7 +582,13 @@ def main():
 
         if records:
             try:
+                # Write to live table (60-day retention)
                 supabase.table('daily_stock_snapshots').upsert(
+                    records, on_conflict='ticker,snapshot_date'
+                ).execute()
+
+                # Also write to historical table (no retention limit — for ML training)
+                supabase.table('historical_snapshots').upsert(
                     records, on_conflict='ticker,snapshot_date'
                 ).execute()
 
@@ -616,6 +609,7 @@ def main():
         time.sleep(RATE_LIMIT_DELAY)
 
     print("\n" + "=" * 80)
+    # Cleanup only applies to daily_stock_snapshots
     cleanup_old_data(supabase, days_to_keep=60)
 
     print("\n" + "=" * 80)
@@ -623,7 +617,7 @@ def main():
     print("=" * 80)
     print(f"✅ Successful: {successful}/{len(NIFTY_500_TICKERS)}")
     print(f"❌ Failed:     {failed}/{len(NIFTY_500_TICKERS)}")
-    print(f"💾 Total records: {total_records:,}")
+    print(f"💾 Total records written: {total_records:,} (to both tables)")
     print(f"📊 Indicators: RSI(14), RSI EMA(9), EMAs(20,50,200), Weekly RSI, 52W High, Alkalyme RS")
     print(f"Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
