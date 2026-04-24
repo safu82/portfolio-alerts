@@ -1,25 +1,27 @@
 name: Daily Portfolio Alerts
+
 on:
   schedule:
-    - cron: '0 14 * * *'  # 7:30 PM IST (14:00 UTC) - same as Entry Signals
-  workflow_dispatch:  # Allows manual trigger
+    - cron: '0 14 * * 1-5'  # 7:30 PM IST (14:00 UTC), Mon–Fri only
+  workflow_dispatch:  # Allow manual trigger
+
 jobs:
   scan-alerts:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-      
+
       - name: Install dependencies
         run: |
-          pip install supabase pandas numpy beautifulsoup4 requests
-      
+          pip install supabase pandas numpy beautifulsoup4 requests python-dateutil anthropic
+
       - name: Delete old alerts (older than 5 days)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -29,16 +31,17 @@ jobs:
           import os
           from datetime import datetime, timedelta
           from supabase import create_client
-          
+
           supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
           cutoff_date = (datetime.now() - timedelta(days=5)).date().isoformat()
-          
+
           result = supabase.table('alerts').delete().lt('alert_date', cutoff_date).execute()
           print(f'🗑️ Deleted alerts older than {cutoff_date}')
           "
-      
+
       - name: Run alert scanner
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python integrated_alert_scanner.py
