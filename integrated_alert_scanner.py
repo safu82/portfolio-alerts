@@ -1,9 +1,11 @@
+#!/usr/bin/env python3
 """
 Integrated Portfolio Alert Scanner - ZERODHA VERSION
 =====================================================
 Scans portfolio holdings for technical alerts that power the Holdings tab badges.
 
 Writes to: `alerts` table (status='NEW', portfolio='INDIAN')
+         + `earnings_calendar` table (persistent earnings dates)
 Reads from: `holdings` table + `daily_stock_snapshots` (Zerodha data)
 
 Active scans:
@@ -11,9 +13,7 @@ Active scans:
 2. Promoter Buying/Selling — Trendlyne scrape
 3. Volume Breakout — 2x average + 3% price move
 4. Blue Zone — Daily RSI EMA(9) >= 72 Strong / 65 Buy, Weekly >= 65 / 55
-5. Quarterly Results — Trendlyne earnings calendar (next 7 days)
-
-Removed: 200 EMA Breakout, 200 EMA Retest (deprecated)
+5. Quarterly Results — Trendlyne earnings calendar (next 30 days → earnings_calendar, 7 days → alert)
 
 Thresholds synced with PRODUCTION_entry_signals_scanner.py (April 2026)
 """
@@ -40,24 +40,23 @@ EMA_CONFIG = {
     'short_ema': 20,
     'long_ema': 50,
     'filter_ema': 200,
-    'lookback_days': 5,   # Check last 5 days for crossover
-    'adx_min_strong': 25, # ADX threshold for Strong Buy grade
-    'adx_min_buy': 20,    # ADX threshold for Buy grade
+    'lookback_days': 5,
+    'adx_min_strong': 25,
+    'adx_min_buy': 20,
 }
 
 VOLUME_CONFIG = {
-    'multiplier': 2.0,    # Volume must be 2x average
-    'avg_period': 20,     # 20-day average volume
-    'min_price_change': 3.0,  # Price must move 3%
+    'multiplier': 2.0,
+    'avg_period': 20,
+    'min_price_change': 3.0,
 }
 
-# UPDATED April 2026 — synced with PRODUCTION_entry_signals_scanner.py
 BLUE_ZONE_CONFIG = {
-    'daily_rsi_strong': 72,    # Strong Buy: Daily RSI EMA(9) >= 72
-    'weekly_rsi_strong': 65,   # Strong Buy: Weekly RSI EMA(9) >= 65
-    'daily_rsi_buy': 65,       # Buy: Daily RSI EMA(9) >= 65
-    'weekly_rsi_buy': 55,      # Buy: Weekly RSI EMA(9) >= 55
-    'max_pct_from_high': 10,   # Must be within 10% of 52W high
+    'daily_rsi_strong': 72,
+    'weekly_rsi_strong': 65,
+    'daily_rsi_buy': 65,
+    'weekly_rsi_buy': 55,
+    'max_pct_from_high': 10,
 }
 
 # =============================================================================
@@ -65,46 +64,27 @@ BLUE_ZONE_CONFIG = {
 # =============================================================================
 
 def fetch_ohlc_from_supabase(ticker: str, days: int = 365) -> pd.DataFrame:
-    """Fetch OHLC + pre-calculated indicators from daily_stock_snapshots."""
     try:
         start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-
         if not ticker.endswith('.NS') and not ticker.endswith('.BO'):
             ticker = f"{ticker}.NS"
-
-        response = supabase.table('daily_stock_snapshots')\
-            .select('*')\
-            .eq('ticker', ticker)\
-            .gte('snapshot_date', start_date)\
-            .order('snapshot_date')\
-            .execute()
-
+        response = supabase.table('daily_stock_snapshots')            .select('*')            .eq('ticker', ticker)            .gte('snapshot_date', start_date)            .order('snapshot_date')            .execute()
         if not response.data:
             return pd.DataFrame()
-
         df = pd.DataFrame(response.data)
         df['snapshot_date'] = pd.to_datetime(df['snapshot_date'])
         df.set_index('snapshot_date', inplace=True)
-        df.rename(columns={
-            'open': 'Open', 'high': 'High', 'low': 'Low',
-            'close': 'Close', 'volume': 'Volume'
-        }, inplace=True)
+        df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low',
+                            'close': 'Close', 'volume': 'Volume'}, inplace=True)
         return df
-
     except Exception as e:
         print(f"  ⚠️ Error fetching {ticker}: {e}")
         return pd.DataFrame()
 
 
 def get_portfolio_stocks():
-    """Fetch current portfolio stocks from holdings table."""
     try:
-        response = supabase.table('holdings')\
-            .select('ticker, name, sector')\
-            .eq('portfolio', 'INDIAN')\
-            .gt('quantity', 0)\
-            .execute()
-
+        response = supabase.table('holdings')            .select('ticker, name, sector')            .eq('portfolio', 'INDIAN')            .gt('quantity', 0)            .execute()
         stocks = []
         for stock in response.data:
             ticker_raw = stock['ticker']
@@ -163,22 +143,14 @@ def calculate_adx(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
 # =============================================================================
 
 def scan_ema_crossover(stock):
-    """
-    20/50 EMA crossover with ADX confirmation.
-    Synced with PRODUCTION_entry_signals_scanner golden_cross logic.
-    """
     ticker = stock['full_ticker']
     symbol = stock['symbol']
     name = stock['name']
-
     try:
         hist = fetch_ohlc_from_supabase(ticker, days=365)
         if hist.empty or len(hist) < 60:
             return None
-
         hist = calculate_adx(hist)
-
-        # Use pre-calculated EMAs from Zerodha OHLC fetcher
         if 'ema_20' in hist.columns and 'ema_50' in hist.columns:
             hist['short_ema'] = hist['ema_20']
             hist['long_ema'] = hist['ema_50']
@@ -187,10 +159,7 @@ def scan_ema_crossover(stock):
             hist['short_ema'] = calculate_ema(hist['Close'], 20)
             hist['long_ema'] = calculate_ema(hist['Close'], 50)
             hist['filter_ema'] = calculate_ema(hist['Close'], 200)
-
         hist['volume_avg'] = hist['Volume'].rolling(window=20).mean()
-
-        # Check for crossover in lookback window
         crossover = None
         for i in range(1, min(EMA_CONFIG['lookback_days'] + 1, len(hist))):
             curr = hist.iloc[-i]
@@ -198,17 +167,14 @@ def scan_ema_crossover(stock):
             if pd.isna([curr['short_ema'], curr['long_ema'],
                         prev['short_ema'], prev['long_ema']]).any():
                 continue
-
             if prev['short_ema'] <= prev['long_ema'] and curr['short_ema'] > curr['long_ema']:
                 crossover = {'type': 'bullish', 'days_ago': i - 1, 'row': curr, 'prev': prev}
                 break
             if prev['short_ema'] >= prev['long_ema'] and curr['short_ema'] < curr['long_ema']:
                 crossover = {'type': 'bearish', 'days_ago': i - 1, 'row': curr, 'prev': prev}
                 break
-
         if not crossover:
             return None
-
         latest = hist.iloc[-1]
         cmp = latest['Close']
         adx_value = float(latest['adx']) if pd.notna(latest['adx']) else 0
@@ -216,15 +182,12 @@ def scan_ema_crossover(stock):
         minus_di = float(latest['minus_di']) if pd.notna(latest['minus_di']) else 0
         avg_volume = latest['volume_avg']
         volume_ratio = float(latest['Volume'] / avg_volume) if avg_volume > 0 else 0
-
         crossover_type = crossover['type']
         alert_type = 'ema_golden_cross' if crossover_type == 'bullish' else 'ema_death_cross'
         alert_category = 'BULLISH' if crossover_type == 'bullish' else 'BEARISH'
-
         ema_20 = round(float(latest['short_ema']), 2)
         ema_50 = round(float(latest['long_ema']), 2)
         ema_200 = round(float(latest['filter_ema']), 2) if pd.notna(latest['filter_ema']) else None
-
         return {
             'portfolio': 'INDIAN',
             'ticker': symbol,
@@ -239,18 +202,13 @@ def scan_ema_crossover(stock):
             'price': round(float(cmp), 2),
             'alert_date': datetime.now().date().isoformat(),
             'details': {
-                'ema_20': ema_20,
-                'ema_50': ema_50,
-                'ema_200': ema_200,
-                'days_ago': crossover['days_ago'],
-                'adx': round(adx_value, 2),
-                'plus_di': round(plus_di, 2),
-                'minus_di': round(minus_di, 2),
+                'ema_20': ema_20, 'ema_50': ema_50, 'ema_200': ema_200,
+                'days_ago': crossover['days_ago'], 'adx': round(adx_value, 2),
+                'plus_di': round(plus_di, 2), 'minus_di': round(minus_di, 2),
                 'volume_ratio': round(volume_ratio, 2),
                 'adx_confirmed': bool(adx_value >= EMA_CONFIG['adx_min_buy'])
             }
         }
-
     except Exception as e:
         print(f"  ❌ EMA scan error {symbol}: {e}")
         return None
@@ -260,7 +218,6 @@ def scan_ema_crossover(stock):
 # =============================================================================
 
 def get_recent_promoter_transactions():
-    """Scrape recent promoter transactions from Trendlyne."""
     url = "https://trendlyne.com/equity/group-insider-trading-sast/"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     try:
@@ -287,39 +244,28 @@ def parse_promoter_transactions(html):
                 continue
             company_name = company_link.text.strip()
             company_url = company_link.get('href', '')
-
             import re
             symbol_match = re.search(r'/([A-Z0-9]+)/', company_url)
             symbol = symbol_match.group(1) if symbol_match else ''
-
             person_link = cols[1].find('a')
             person = person_link.text.strip() if person_link else cols[1].text.strip()
             category = cols[2].text.strip()
             transaction_type = cols[3].text.strip()
             date = cols[4].text.strip()
-
             shares_text = cols[5].text.strip().replace(',', '')
             try:
                 shares = int(shares_text) if shares_text and shares_text != '-' else 0
             except:
                 shares = 0
-
             holding_text = cols[6].text.strip()
             pct_change = cols[7].text.strip() if len(cols) > 7 else ''
-
             if 'promoter' not in category.lower():
                 continue
-
             transactions.append({
-                'company_name': company_name,
-                'symbol': symbol,
-                'person_entity': person,
-                'category': category,
-                'transaction_type': transaction_type,
-                'date': date,
-                'shares': shares,
-                'post_holding': holding_text,
-                'pct_change': pct_change,
+                'company_name': company_name, 'symbol': symbol,
+                'person_entity': person, 'category': category,
+                'transaction_type': transaction_type, 'date': date,
+                'shares': shares, 'post_holding': holding_text, 'pct_change': pct_change,
             })
         except:
             continue
@@ -327,19 +273,15 @@ def parse_promoter_transactions(html):
 
 
 def scan_promoter_buying(portfolio_stocks):
-    """Filter Trendlyne promoter transactions for portfolio stocks only."""
     all_transactions = get_recent_promoter_transactions()
     if not all_transactions:
         print("  ⚠️ No promoter transactions found")
         return []
-
     portfolio_symbols = {stock['symbol'].upper() for stock in portfolio_stocks}
     portfolio_transactions = [
-        t for t in all_transactions
-        if t['symbol'].upper() in portfolio_symbols
+        t for t in all_transactions if t['symbol'].upper() in portfolio_symbols
     ]
     print(f"  ✅ Found {len(portfolio_transactions)} promoter transactions in portfolio")
-
     alerts = []
     for txn in portfolio_transactions:
         is_buying = ('acquisition' in txn['transaction_type'].lower() or
@@ -348,35 +290,25 @@ def scan_promoter_buying(portfolio_stocks):
                       'sale' in txn['transaction_type'].lower())
         if not (is_buying or is_selling):
             continue
-
         stock_name = next(
-            (s['name'] for s in portfolio_stocks
-             if s['symbol'].upper() == txn['symbol'].upper()),
+            (s['name'] for s in portfolio_stocks if s['symbol'].upper() == txn['symbol'].upper()),
             txn['company_name']
         )
-
         try:
             alert_date = datetime.strptime(txn['date'], "%d %b %Y").date().isoformat()
         except:
             alert_date = datetime.now().date().isoformat()
-
         alerts.append({
-            'portfolio': 'INDIAN',
-            'ticker': txn['symbol'],
-            'stock_name': stock_name,
+            'portfolio': 'INDIAN', 'ticker': txn['symbol'], 'stock_name': stock_name,
             'alert_type': 'promoter_buying' if is_buying else 'promoter_selling',
             'alert_category': 'BULLISH' if is_buying else 'BEARISH',
             'alert_title': f"{stock_name} - Promoter {'Buying' if is_buying else 'Selling'}",
             'alert_description': f"{txn['person_entity'][:50]} - {txn['transaction_type']}",
-            'price': None,
-            'alert_date': alert_date,
+            'price': None, 'alert_date': alert_date,
             'details': {
-                'person_entity': txn['person_entity'],
-                'transaction_type': txn['transaction_type'],
-                'shares': txn['shares'],
-                'post_holding': txn['post_holding'],
-                'pct_change': txn['pct_change'],
-                'category': txn['category']
+                'person_entity': txn['person_entity'], 'transaction_type': txn['transaction_type'],
+                'shares': txn['shares'], 'post_holding': txn['post_holding'],
+                'pct_change': txn['pct_change'], 'category': txn['category']
             }
         })
     return alerts
@@ -386,40 +318,30 @@ def scan_promoter_buying(portfolio_stocks):
 # =============================================================================
 
 def scan_volume_breakout(stock):
-    """Volume > 2x average with >= 3% price move."""
     ticker = stock['full_ticker']
     symbol = stock['symbol']
     name = stock['name']
-
     try:
         hist = fetch_ohlc_from_supabase(ticker, days=365)
         if hist.empty or len(hist) < VOLUME_CONFIG['avg_period']:
             return None
-
         hist['volume_avg'] = hist['Volume'].rolling(window=VOLUME_CONFIG['avg_period']).mean()
         current_volume = hist['Volume'].iloc[-1]
         avg_volume = hist['volume_avg'].iloc[-1]
         current_price = hist['Close'].iloc[-1]
         prev_price = hist['Close'].iloc[-2]
-
         if pd.isna(avg_volume) or avg_volume == 0:
             return None
-
         volume_ratio = current_volume / avg_volume
         if volume_ratio < VOLUME_CONFIG['multiplier']:
             return None
-
         price_change_pct = ((current_price - prev_price) / prev_price) * 100
         if abs(price_change_pct) < VOLUME_CONFIG['min_price_change']:
             return None
-
         is_bullish = price_change_pct > 0
         alert_type = 'volume_breakout_bullish' if is_bullish else 'volume_breakout_bearish'
-
         return {
-            'portfolio': 'INDIAN',
-            'ticker': symbol,
-            'stock_name': name,
+            'portfolio': 'INDIAN', 'ticker': symbol, 'stock_name': name,
             'alert_type': alert_type,
             'alert_category': 'BULLISH' if is_bullish else 'BEARISH',
             'alert_title': f"{name} - Volume Breakout ({'Bullish' if is_bullish else 'Bearish'})",
@@ -430,14 +352,12 @@ def scan_volume_breakout(stock):
             'price': round(float(current_price), 2),
             'alert_date': datetime.now().date().isoformat(),
             'details': {
-                'current_volume': int(current_volume),
-                'avg_volume': int(avg_volume),
+                'current_volume': int(current_volume), 'avg_volume': int(avg_volume),
                 'volume_ratio': round(float(volume_ratio), 2),
                 'price_change_pct': round(float(price_change_pct), 2),
                 'direction': 'up' if is_bullish else 'down'
             }
         }
-
     except Exception as e:
         print(f"  ❌ Volume scan error {symbol}: {e}")
         return None
@@ -447,51 +367,33 @@ def scan_volume_breakout(stock):
 # =============================================================================
 
 def scan_blue_zone_stocks(stock):
-    """
-    Blue Zone momentum signal — UPDATED thresholds (April 2026):
-    Strong: Daily RSI EMA(9) >= 72, Weekly RSI EMA(9) >= 65, above EMA50, volume > 1.5x
-    Buy:    Daily RSI EMA(9) >= 65, Weekly RSI EMA(9) >= 55, above EMA20
-    Within 10% of 52W high.
-    Uses pre-calculated RSI values from daily_stock_snapshots.
-    """
     ticker = stock['full_ticker']
     symbol = stock['symbol']
     name = stock['name']
-
     try:
         hist = fetch_ohlc_from_supabase(ticker, days=365)
         if hist.empty or len(hist) < 50:
             return None
-
         latest = hist.iloc[-1]
-
-        # Use pre-calculated values from OHLC fetcher
         daily_rsi_ema_9 = latest.get('rsi_ema_9')
         weekly_rsi_ema_9 = latest.get('weekly_rsi_ema_9')
         ema_20 = latest.get('ema_20')
         ema_50 = latest.get('ema_50')
         current_price = float(latest['Close'])
-
         if pd.isna(daily_rsi_ema_9) or pd.isna(weekly_rsi_ema_9):
             return None
-
-        # 52W high — use stored column if available, else rolling max
         high_52w = latest.get('high_52w')
         if pd.isna(high_52w) or high_52w is None:
             high_52w = float(hist['High'].max())
         else:
             high_52w = float(high_52w)
-
         distance_from_high = ((current_price - high_52w) / high_52w) * 100
         if distance_from_high < -BLUE_ZONE_CONFIG['max_pct_from_high']:
             return None
-
         avg_volume = hist['Volume'].tail(20).mean()
         volume_ratio = float(latest['Volume'] / avg_volume) if avg_volume > 0 else 0
         above_ema_50 = current_price > float(ema_50) if pd.notna(ema_50) else False
         above_ema_20 = current_price > float(ema_20) if pd.notna(ema_20) else False
-
-        # Determine grade
         if (daily_rsi_ema_9 >= BLUE_ZONE_CONFIG['daily_rsi_strong'] and
                 weekly_rsi_ema_9 >= BLUE_ZONE_CONFIG['weekly_rsi_strong'] and
                 above_ema_50 and volume_ratio > 1.5):
@@ -504,8 +406,6 @@ def scan_blue_zone_stocks(stock):
             alert_type = 'blue_zone_stocks'
         else:
             return None
-
-        # Count consecutive days in Blue Zone
         days_in_bz = 1
         for i in range(len(hist) - 2, -1, -1):
             row = hist.iloc[i]
@@ -518,18 +418,14 @@ def scan_blue_zone_stocks(stock):
                 days_in_bz += 1
             else:
                 break
-
         return {
-            'portfolio': 'INDIAN',
-            'ticker': symbol,
-            'stock_name': name,
-            'alert_type': alert_type,
-            'alert_category': 'BULLISH',
+            'portfolio': 'INDIAN', 'ticker': symbol, 'stock_name': name,
+            'alert_type': alert_type, 'alert_category': 'BULLISH',
             'alert_title': f"{name} - Blue Zone ({grade})",
             'alert_description': (
                 f"{grade}: Daily RSI: {daily_rsi_ema_9:.1f}, Weekly RSI: {weekly_rsi_ema_9:.1f}, "
-                f"{abs(distance_from_high):.1f}% from 52W high • {days_in_bz} days in zone"
-                + (f" + Vol {volume_ratio:.1f}x 🔥" if volume_ratio >= 1.5 else "")
+                f"{abs(distance_from_high):.1f}% from 52W high \u2022 {days_in_bz} days in zone"
+                + (f" + Vol {volume_ratio:.1f}x \U0001F525" if volume_ratio >= 1.5 else "")
             ),
             'price': round(current_price, 2),
             'alert_date': datetime.now().date().isoformat(),
@@ -538,27 +434,61 @@ def scan_blue_zone_stocks(stock):
                 'weekly_rsi_ema_9': round(float(weekly_rsi_ema_9), 2),
                 'grade': grade,
                 'pct_from_52w_high': round(distance_from_high, 2),
-                'above_ema_50': above_ema_50,
-                'above_ema_20': above_ema_20,
+                'above_ema_50': above_ema_50, 'above_ema_20': above_ema_20,
                 'volume_ratio': round(volume_ratio, 2),
                 'days_in_blue_zone': days_in_bz,
                 'daily_threshold': BLUE_ZONE_CONFIG['daily_rsi_buy'],
                 'weekly_threshold': BLUE_ZONE_CONFIG['weekly_rsi_buy']
             }
         }
-
     except Exception as e:
         print(f"  ❌ Blue Zone scan error {symbol}: {e}")
         return None
 
 # =============================================================================
-# SCAN: QUARTERLY RESULTS
+# EARNINGS CALENDAR HELPERS (NEW)
+# =============================================================================
+
+def upsert_earnings_calendar(ticker: str, stock_name: str,
+                              earnings_date, quarter: str, source: str = 'trendlyne'):
+    """Upsert earnings date to persistent earnings_calendar table."""
+    try:
+        supabase.table('earnings_calendar').upsert({
+            'ticker':        ticker,
+            'stock_name':    stock_name,
+            'earnings_date': earnings_date.isoformat() if hasattr(earnings_date, 'isoformat') else str(earnings_date),
+            'quarter':       quarter,
+            'source':        source,
+            'updated_at':    datetime.now().isoformat(),
+        }, on_conflict='ticker,earnings_date').execute()
+        return True
+    except Exception as e:
+        print(f"  ⚠️ earnings_calendar upsert error for {ticker}: {e}")
+        return False
+
+
+def cleanup_old_earnings():
+    """Remove earnings_calendar rows more than 7 days in the past."""
+    try:
+        cutoff = (datetime.now().date() - timedelta(days=7)).isoformat()
+        supabase.table('earnings_calendar').delete().lt('earnings_date', cutoff).execute()
+        print("  ✅ Cleaned up old earnings_calendar entries")
+    except Exception as e:
+        print(f"  ⚠️ earnings_calendar cleanup error: {e}")
+
+# =============================================================================
+# SCAN: QUARTERLY RESULTS (UPDATED)
 # =============================================================================
 
 def scan_upcoming_results(stock):
-    """Upcoming quarterly results in next 7 days from Trendlyne."""
-    symbol = stock['symbol']
-    name = stock['name']
+    """
+    Upcoming quarterly results from Trendlyne.
+    - Window: 30 days (upserts to earnings_calendar for all within 30 days)
+    - Alert: only created if within 7 days (for Holdings tab badge)
+    """
+    symbol      = stock['symbol']
+    name        = stock['name']
+    full_ticker = stock['full_ticker']
 
     try:
         url = f"https://trendlyne.com/equity/{symbol}/results-calendar/"
@@ -578,18 +508,15 @@ def scan_upcoming_results(stock):
                 parent = text_elem.parent
                 if parent:
                     date_text = parent.get_text()
-                    date_patterns = [
-                        r'(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{4})',
-                    ]
-                    for pattern in date_patterns:
-                        match = re.search(pattern, date_text, re.IGNORECASE)
-                        if match:
-                            try:
-                                from dateutil import parser
-                                results_date = parser.parse(date_text, fuzzy=True).date()
-                                break
-                            except:
-                                continue
+                    pattern = r'(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{4})'
+                    match = re.search(pattern, date_text, re.IGNORECASE)
+                    if match:
+                        try:
+                            from dateutil import parser as dateparser
+                            results_date = dateparser.parse(date_text, fuzzy=True).date()
+                            break
+                        except:
+                            continue
                 if results_date:
                     break
 
@@ -599,11 +526,13 @@ def scan_upcoming_results(stock):
         today = datetime.now().date()
         days_until = (results_date - today).days
 
-        if days_until < 0 or days_until > 7:
+        # Skip if already past or more than 30 days away
+        if days_until < 0 or days_until > 30:
             return None
 
+        # Determine quarter string
         current_month = datetime.now().month
-        current_year = datetime.now().year
+        current_year  = datetime.now().year
         if current_month <= 3:
             quarter, fy_year = 'Q4', current_year
         elif current_month <= 6:
@@ -612,6 +541,14 @@ def scan_upcoming_results(stock):
             quarter, fy_year = 'Q2', current_year + 1
         else:
             quarter, fy_year = 'Q3', current_year + 1
+        quarter_str = f"{quarter} FY{fy_year}"
+
+        # Always upsert to earnings_calendar (persistent, 30-day window)
+        upsert_earnings_calendar(full_ticker, name, results_date, quarter_str)
+
+        # Only create alert if within 7 days
+        if days_until > 7:
+            return None
 
         return {
             'portfolio': 'INDIAN',
@@ -628,9 +565,9 @@ def scan_upcoming_results(stock):
             'alert_date': today.isoformat(),
             'details': {
                 'results_date': results_date.isoformat(),
-                'days_until': days_until,
-                'quarter': f"{quarter} FY{fy_year}",
-                'priority': 'URGENT' if days_until <= 3 else 'UPCOMING'
+                'days_until':   days_until,
+                'quarter':      quarter_str,
+                'priority':     'URGENT' if days_until <= 3 else 'UPCOMING'
             }
         }
 
@@ -643,7 +580,6 @@ def scan_upcoming_results(stock):
 # =============================================================================
 
 def insert_alert(alert_data):
-    """Insert alert — archive old, skip if today's already exists."""
     try:
         import json
         if 'details' in alert_data and alert_data['details']:
@@ -651,38 +587,18 @@ def insert_alert(alert_data):
                 json.dumps(alert_data['details'],
                            default=lambda x: bool(x) if isinstance(x, (bool, np.bool_)) else str(x))
             )
-
         today = datetime.now().date().isoformat()
-
-        # Archive old alerts for same ticker+type
-        old = supabase.table('alerts').select('id')\
-            .eq('ticker', alert_data['ticker'])\
-            .eq('alert_type', alert_data['alert_type'])\
-            .lt('alert_date', today)\
-            .eq('status', 'NEW')\
-            .execute()
-
+        old = supabase.table('alerts').select('id')            .eq('ticker', alert_data['ticker'])            .eq('alert_type', alert_data['alert_type'])            .lt('alert_date', today)            .eq('status', 'NEW')            .execute()
         if old.data:
             for a in old.data:
-                supabase.table('alerts').update({'status': 'ARCHIVED'})\
-                    .eq('id', a['id']).execute()
+                supabase.table('alerts').update({'status': 'ARCHIVED'})                    .eq('id', a['id']).execute()
             print(f"  📦 Archived {len(old.data)} old alert(s) for {alert_data['ticker']}")
-
-        # Skip if today's already exists
-        existing = supabase.table('alerts').select('id')\
-            .eq('ticker', alert_data['ticker'])\
-            .eq('alert_type', alert_data['alert_type'])\
-            .eq('alert_date', today)\
-            .eq('status', 'NEW')\
-            .execute()
-
+        existing = supabase.table('alerts').select('id')            .eq('ticker', alert_data['ticker'])            .eq('alert_type', alert_data['alert_type'])            .eq('alert_date', today)            .eq('status', 'NEW')            .execute()
         if existing.data:
             return False
-
         supabase.table('alerts').insert(alert_data).execute()
         print(f"  ✅ {alert_data['ticker']} — {alert_data['alert_type']}")
         return True
-
     except Exception as e:
         print(f"  ❌ Insert error: {e}")
         return False
@@ -691,8 +607,7 @@ def insert_alert(alert_data):
 def auto_archive_old_alerts(days=1):
     try:
         cutoff = (datetime.now() - timedelta(days=days)).date().isoformat()
-        result = supabase.table('alerts').update({'status': 'ARCHIVED'})\
-            .eq('status', 'NEW').lt('alert_date', cutoff).execute()
+        result = supabase.table('alerts').update({'status': 'ARCHIVED'})            .eq('status', 'NEW').lt('alert_date', cutoff).execute()
         count = len(result.data) if result.data else 0
         if count > 0:
             print(f"  ✅ Auto-archived {count} alerts older than {days} days")
@@ -703,14 +618,12 @@ def auto_archive_old_alerts(days=1):
 def archive_past_results_alerts():
     try:
         today = datetime.now().date().isoformat()
-        alerts_resp = supabase.table('alerts').select('id, details')\
-            .eq('alert_type', 'quarterly_results').eq('status', 'NEW').execute()
+        alerts_resp = supabase.table('alerts').select('id, details')            .eq('alert_type', 'quarterly_results').eq('status', 'NEW').execute()
         archived = 0
         for alert in alerts_resp.data:
             if alert.get('details') and alert['details'].get('results_date'):
                 if alert['details']['results_date'] < today:
-                    supabase.table('alerts').update({'status': 'ARCHIVED'})\
-                        .eq('id', alert['id']).execute()
+                    supabase.table('alerts').update({'status': 'ARCHIVED'})                        .eq('id', alert['id']).execute()
                     archived += 1
         if archived > 0:
             print(f"  ✅ Archived {archived} past results alerts")
@@ -743,9 +656,11 @@ def main():
     auto_archive_old_alerts(days=1)
     archive_past_results_alerts()
 
+    print("\n🗑️  Cleaning up old earnings calendar entries...")
+    cleanup_old_earnings()
+
     total_alerts = 0
 
-    # Step 1: EMA Crossover
     print(f"\n🔍 EMA Crossovers (20/50, lookback {EMA_CONFIG['lookback_days']} days)...")
     for stock in portfolio_stocks:
         print(f"  {stock['name']} ({stock['symbol']})...")
@@ -753,13 +668,11 @@ def main():
         if alert and insert_alert(alert):
             total_alerts += 1
 
-    # Step 2: Promoter Buying
     print("\n💼 Promoter Transactions (Trendlyne)...")
     for alert in scan_promoter_buying(portfolio_stocks):
         if insert_alert(alert):
             total_alerts += 1
 
-    # Step 3: Volume Breakout
     print(f"\n📈 Volume Breakouts (>{VOLUME_CONFIG['multiplier']}x avg, >{VOLUME_CONFIG['min_price_change']}% move)...")
     for stock in portfolio_stocks:
         print(f"  {stock['name']}...")
@@ -767,7 +680,6 @@ def main():
         if alert and insert_alert(alert):
             total_alerts += 1
 
-    # Step 4: Blue Zone
     print(f"\n🔵 Blue Zone (Daily RSI EMA9 >= {BLUE_ZONE_CONFIG['daily_rsi_buy']}, "
           f"Weekly >= {BLUE_ZONE_CONFIG['weekly_rsi_buy']})...")
     for stock in portfolio_stocks:
@@ -776,8 +688,7 @@ def main():
         if alert and insert_alert(alert):
             total_alerts += 1
 
-    # Step 5: Quarterly Results
-    print("\n📅 Upcoming Quarterly Results (next 7 days)...")
+    print("\n📅 Upcoming Quarterly Results (30-day window → earnings_calendar, 7-day → alert)...")
     for stock in portfolio_stocks:
         print(f"  {stock['name']}...")
         alert = scan_upcoming_results(stock)
