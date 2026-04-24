@@ -8,6 +8,7 @@ Fetches (Screener.in only — yfinance handled separately by fetch_yfinance_metr
   - Key ratios: PE TTM, ROE, ROCE, Debt/Equity, Net Margin, Book Value
   - Shareholding: Promoter, FII, DII
   - PE 3Y Avg (from chart data if available)
+  - Compounded growth rates: Sales, Profit, Stock Price CAGR, ROE (10Y/5Y/3Y/TTM)
 
 Schedule: Saturday 7:00 AM IST (01:30 UTC)
 Runtime: ~25-35 min for 450 stocks at ~3-4s per stock
@@ -34,6 +35,23 @@ SCREENER_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-IN,en;q=0.9',
     'Referer': 'https://www.screener.in/',
+}
+
+# ── Growth section header → DB column prefix mapping ─────────────────────────
+GROWTH_SECTIONS = {
+    'Compounded Sales Growth':  'sales_growth',
+    'Compounded Profit Growth': 'profit_growth',
+    'Stock Price CAGR':         'price_cagr',
+    'Return on Equity':         'roe',
+}
+
+PERIOD_MAP = {
+    '10 years:': '10y',
+    '5 years:':  '5y',
+    '3 years:':  '3y',
+    'ttm:':      'ttm',
+    '1 year:':   '1y',
+    'last year:': 'last_year',
 }
 
 # ── Ticker → Screener symbol ──────────────────────────────────────────────────
@@ -83,13 +101,11 @@ def scrape_screener(ticker_ns):
             # ── Key ratios ────────────────────────────────────────────────────
             ratios = soup.find('section', id='top-ratios')
             if ratios:
-                # Debug: print all labels for first stock only
-                all_labels = [li.find('span', class_='name').get_text(strip=True) 
-                              for li in ratios.find_all('li') 
+                all_labels = [li.find('span', class_='name').get_text(strip=True)
+                              for li in ratios.find_all('li')
                               if li.find('span', class_='name')]
                 if not hasattr(scrape_screener, '_labels_printed'):
                     print(f'    📋 Screener ratio labels: {all_labels}')
-                    # Also print raw HTML of first few lis to debug value structure
                     for li in ratios.find_all('li')[:3]:
                         print(f'    🔍 LI HTML: {str(li)[:200]}')
                     scrape_screener._labels_printed = True
@@ -98,11 +114,9 @@ def scrape_screener(ticker_ns):
                     if not lbl:
                         continue
                     label = lbl.get_text(strip=True).lower()
-                    # Get value — try multiple span classes, then fall back to full li text
-                    val_el = (li.find('span', class_='nowrap') or 
+                    val_el = (li.find('span', class_='nowrap') or
                               li.find('span', class_='number') or
                               li.find('span', class_='value'))
-                    # Some Screener values are just text nodes after the label span
                     raw_text = val_el.get_text(strip=True) if val_el else li.get_text(strip=True).replace(lbl.get_text(strip=True), '').strip()
                     v = parse_num(raw_text)
                     if v is None:
@@ -126,6 +140,28 @@ def scrape_screener(ticker_ns):
                     elif 'opm' in label or 'operating profit margin' in label:
                         result['ebitda_margin'] = v / 100 if v > 1 else v
 
+            # ── Compounded growth rates ───────────────────────────────────────
+            for th in soup.find_all('th', colspan='2'):
+                section_name = th.get_text(strip=True)
+                if section_name not in GROWTH_SECTIONS:
+                    continue
+                prefix = GROWTH_SECTIONS[section_name]
+                table  = th.find_parent('table')
+                if not table:
+                    continue
+                for tr in table.find_all('tr'):
+                    cells = tr.find_all('td')
+                    if len(cells) < 2:
+                        continue
+                    period_label = cells[0].get_text(strip=True).lower()
+                    value_text   = cells[1].get_text(strip=True)
+                    period_key   = PERIOD_MAP.get(period_label)
+                    if not period_key:
+                        continue
+                    val = parse_num(value_text)
+                    if val is not None:
+                        result[f'{prefix}_{period_key}'] = val
+
             # ── Shareholding ──────────────────────────────────────────────────
             sh = soup.find('section', id='shareholding')
             if sh:
@@ -134,8 +170,8 @@ def scrape_screener(ticker_ns):
                     if not cells:
                         continue
                     label = cells[0].get_text(strip=True).lower()
-                    vals = [parse_num(c.get_text(strip=True)) for c in cells[1:]]
-                    vals = [v for v in vals if v is not None]
+                    vals  = [parse_num(c.get_text(strip=True)) for c in cells[1:]]
+                    vals  = [v for v in vals if v is not None]
                     if not vals:
                         continue
                     latest = vals[-1]
@@ -151,7 +187,7 @@ def scrape_screener(ticker_ns):
             if pl:
                 table = pl.find('table')
                 if table:
-                    headers = [th.get_text(strip=True) for th in table.find_all('th')]
+                    headers  = [th.get_text(strip=True) for th in table.find_all('th')]
                     q_labels = list(reversed(headers[1:][-8:]))  # newest first
 
                     def get_row(keyword):
@@ -167,7 +203,7 @@ def scrape_screener(ticker_ns):
                     revenues    = get_row('sales')
                     net_profs   = get_row('net profit')
                     eps_vals    = get_row('eps')
-                    ebitda_vals = get_row('operating profit')  # Screener calls it "Operating Profit"
+                    ebitda_vals = get_row('operating profit')
 
                     quarterly = []
                     for i, q in enumerate(q_labels):
@@ -195,7 +231,6 @@ def scrape_screener(ticker_ns):
             # ── Compute ROCE and ROE from profit-loss + balance-sheet ─────────
             try:
                 def get_table_row(section_id, row_label):
-                    """Get latest (last) numeric value for a row in a section table."""
                     sec = soup.find('section', id=section_id)
                     if not sec: return None
                     tbl = sec.find('table')
@@ -204,15 +239,12 @@ def scrape_screener(ticker_ns):
                         cells = tr.find_all(['td', 'th'])
                         if not cells: continue
                         if row_label.lower() in cells[0].get_text(strip=True).lower():
-                            # Get last non-empty numeric value
                             for cell in reversed(cells[1:]):
                                 v = parse_num(cell.get_text(strip=True))
                                 if v is not None:
                                     return v
                     return None
 
-                # ROCE = (Operating Profit + Other Income) / Capital Employed × 100
-                # Capital Employed = Total Assets - Other Liabilities (current liabilities)
                 op_profit    = get_table_row('profit-loss', 'operating profit')
                 other_income = get_table_row('profit-loss', 'other income')
                 total_assets = get_table_row('balance-sheet', 'total assets')
@@ -223,21 +255,17 @@ def scrape_screener(ticker_ns):
                     if capital_employed > 0:
                         result['roce'] = round(ebit / capital_employed * 100, 1)
 
-                # ROE = Net Profit / Shareholders Equity × 100
-                # Shareholders Equity = Equity Capital + Reserves
-                net_profit    = get_table_row('profit-loss', 'net profit')
-                equity_cap    = get_table_row('balance-sheet', 'equity capital')
-                reserves      = get_table_row('balance-sheet', 'reserves')
+                net_profit = get_table_row('profit-loss', 'net profit')
+                equity_cap = get_table_row('balance-sheet', 'equity capital')
+                reserves   = get_table_row('balance-sheet', 'reserves')
                 if net_profit and equity_cap is not None and reserves is not None:
                     equity = equity_cap + reserves
                     if equity > 0:
                         result['roe'] = round(net_profit / equity * 100, 1)
 
-                # Net Margin = Net Profit / Sales × 100
                 sales = get_table_row('profit-loss', 'sales')
                 if net_profit and sales and sales > 0:
                     result.setdefault('net_margin', round(net_profit / sales * 100, 1) / 100)
-                # Note: EPS is captured per-quarter from the quarters table — not overriding here
 
             except Exception as e:
                 print(f'    ⚠️  ROCE/ROE compute error: {e}')
@@ -250,7 +278,7 @@ def scrape_screener(ticker_ns):
         except Exception as e:
             print(f'    ❌ Error: {e}')
 
-    return result  # empty if both URLs failed
+    return result
 
 # ── Save batch to Supabase ────────────────────────────────────────────────────
 def save_batch(supabase, records):
@@ -275,8 +303,7 @@ def main():
 
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    # Get all tickers from indian_stock_sectors
-    res = supabase.table('indian_stock_sectors').select('ticker, company_name').execute()
+    res     = supabase.table('indian_stock_sectors').select('ticker, company_name').execute()
     tickers = [(r['ticker'], r['company_name']) for r in res.data if r.get('ticker', '').endswith('.NS')]
     print(f'📋 {len(tickers)} NSE tickers to process\n')
 
@@ -296,15 +323,14 @@ def main():
             fields = [k for k in data if k not in ('source_screener',)]
             print(f'✓ {len(fields)} fields')
             record = {
-                'ticker':         ticker,
-                'stock_name':     name,
-                'last_updated':   datetime.utcnow().isoformat(),
+                'ticker':          ticker,
+                'stock_name':      name,
+                'last_updated':    datetime.utcnow().isoformat(),
                 'source_screener': True,
             }
             record.update({k: v for k, v in data.items() if v is not None})
             pending_records.append(record)
 
-        # Save in batches
         if len(pending_records) >= BATCH_SIZE:
             s, f = save_batch(supabase, pending_records)
             success_total += s
@@ -312,13 +338,11 @@ def main():
             pending_records = []
             print(f'  💾 Saved batch — total so far: {success_total}')
 
-        # Polite delays
         time.sleep(SLEEP_BETWEEN)
         if i % 50 == 0:
             print(f'\n  ⏸️  Pause ({SLEEP_EVERY_50}s) after {i} stocks...\n')
             time.sleep(SLEEP_EVERY_50)
 
-    # Save remaining
     if pending_records:
         s, f = save_batch(supabase, pending_records)
         success_total += s
