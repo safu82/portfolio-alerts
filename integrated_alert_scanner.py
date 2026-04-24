@@ -792,7 +792,20 @@ def check_post_earnings_declarations():
 
         latest_screener_period = quarters[0].get('period')
 
-        if db_latest_period and latest_screener_period == db_latest_period:
+        if db_latest_period is None:
+            # No previous data — store what Screener has but don't mark declared yet.
+            # Next run will compare properly.
+            print(f"    📥 No prior data in DB — storing {latest_screener_period} as baseline (not declaring)")
+            try:
+                supabase.table('stock_fundamentals').upsert(
+                    {'ticker': ticker, 'quarterly_financials': quarters},
+                    on_conflict='ticker'
+                ).execute()
+            except Exception as e:
+                print(f"    ⚠️ Baseline store error: {e}")
+            continue
+
+        if latest_screener_period == db_latest_period:
             print(f"    ⏳ No new quarter yet (still showing {db_latest_period})")
             continue
 
