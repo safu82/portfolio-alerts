@@ -234,17 +234,42 @@ def main():
     print(f"  Longest BZ streak: {bz_stats['longest']} days ({bz_stats['longest_ticker']})")
     print(f"  Stocks in Golden Cross: {gc_stats['in_gc']}")
 
+    # ── Fetch fundamentals for sector composite score ─────────────────────────
+    print("\n📊 Fetching sector fundamentals for composite rank...")
+    fund_rows = paginated_fetch(supabase, 'stock_fundamentals',
+                                'ticker, sector_pct_roe, sector_pct_net_margin, sector_pct_profit_3y',
+                                lambda q: q)
+    fund_by_ticker = {r['ticker']: r for r in fund_rows}
+    print(f"  Fetched fundamentals for {len(fund_by_ticker)} tickers")
+
     # ── 6. Build update records and write to Supabase ───────────────────────
     updates = []
     for rank, row in enumerate(sorted_data, 1):
-        ticker = row['ticker']
+        ticker  = row['ticker']
         metrics = ticker_metrics.get(ticker, {'bz_streak': 0, 'gc_crossover_date': None})
+        fund    = fund_by_ticker.get(ticker, {})
+
+        # Sector composite = RS 40% + ROE 25% + Profit Growth 3Y 20% + Net Margin 15%
+        # sector_percentile (RS-based) lives in daily_stock_snapshots from yesterday's run
+        # We fetch it from the history we already have
+        hist        = history_by_ticker.get(ticker, [])
+        rs_pct      = hist[-1].get('sector_percentile') if hist else None
+        roe_pct     = fund.get('sector_pct_roe')
+        margin_pct  = fund.get('sector_pct_net_margin')
+        profit_pct  = fund.get('sector_pct_profit_3y')
+
+        available = [(v, w) for v, w in [
+            (rs_pct, 0.40), (roe_pct, 0.25), (profit_pct, 0.20), (margin_pct, 0.15)
+        ] if v is not None]
+        composite = round(sum(v * w for v, w in available) / sum(w for _, w in available), 1) if available else None
+
         updates.append({
-            'ticker': ticker,
-            'snapshot_date': today,
-            'rs_rank': rank,
-            'bz_streak': metrics['bz_streak'],
-            'gc_crossover_date': metrics['gc_crossover_date'],
+            'ticker':              ticker,
+            'snapshot_date':       today,
+            'rs_rank':             rank,
+            'bz_streak':           metrics['bz_streak'],
+            'gc_crossover_date':   metrics['gc_crossover_date'],
+            'sector_composite_pct': composite,
         })
 
     print(f"\n💾 Writing {len(updates)} records to Supabase...")
@@ -258,9 +283,10 @@ def main():
             try:
                 supabase.table('daily_stock_snapshots')\
                     .update({
-                        'rs_rank':           row['rs_rank'],
-                        'bz_streak':         row['bz_streak'],
-                        'gc_crossover_date': row['gc_crossover_date'],
+                        'rs_rank':               row['rs_rank'],
+                        'bz_streak':             row['bz_streak'],
+                        'gc_crossover_date':     row['gc_crossover_date'],
+                        'sector_composite_pct':  row['sector_composite_pct'],
                     })\
                     .eq('ticker', row['ticker'])\
                     .eq('snapshot_date', row['snapshot_date'])\
