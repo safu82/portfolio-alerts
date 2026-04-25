@@ -200,7 +200,27 @@ def main():
     for row in sorted_data[:10]:
         print(f"    #{sorted_data.index(row)+1:3d}  {row['ticker']:20s}  RS={row['alkalyme_rs']:.2f}")
 
-    # ── 5. Compute BZ streak + GC crossover for each ticker ─────────────────
+    # ── 5a. Compute sector_percentile (RS rank within sector) ───────────────
+    print("\n🏆 Computing sector_percentile (RS rank within sector)...")
+    sector_rows = paginated_fetch(supabase, 'indian_stock_sectors', 'ticker, sector', lambda q: q)
+    ticker_to_sector = {r['ticker']: r['sector'] for r in sector_rows if r.get('sector')}
+
+    sector_rs_groups = defaultdict(list)
+    for row in sorted_data:
+        sector = ticker_to_sector.get(row['ticker'])
+        if sector:
+            sector_rs_groups[sector].append((row['ticker'], row['alkalyme_rs'] or 0))
+
+    ticker_sector_pct = {}
+    for sector, pairs in sector_rs_groups.items():
+        pairs_sorted = sorted(pairs, key=lambda x: -x[1])
+        n = len(pairs_sorted)
+        for i, (ticker, rs) in enumerate(pairs_sorted):
+            ticker_sector_pct[ticker] = round((i + 1) / n * 100)  # integer percentile
+
+    print(f"  Computed sector_percentile for {len(ticker_sector_pct)} tickers")
+
+    # ── 5b. Compute BZ streak + GC crossover for each ticker ─────────────────
     print("\n🔢 Computing BZ streaks and GC crossover dates...")
     bz_stats = {'in_bz': 0, 'longest': 0, 'longest_ticker': ''}
     gc_stats = {'in_gc': 0}
@@ -220,6 +240,7 @@ def main():
         ticker_metrics[ticker] = {
             'bz_streak': bz_streak,
             'gc_crossover_date': gc_date,
+            'sector_percentile': ticker_sector_pct.get(ticker),
         }
 
         if bz_streak > 0:
@@ -264,12 +285,13 @@ def main():
         composite = round(sum(v * w for v, w in available) / sum(w for _, w in available), 1) if available else None
 
         updates.append({
-            'ticker':              ticker,
-            'snapshot_date':       today,
-            'rs_rank':             rank,
-            'bz_streak':           metrics['bz_streak'],
-            'gc_crossover_date':   metrics['gc_crossover_date'],
+            'ticker':               ticker,
+            'snapshot_date':        today,
+            'rs_rank':              rank,
+            'bz_streak':            metrics['bz_streak'],
+            'gc_crossover_date':    metrics['gc_crossover_date'],
             'sector_composite_pct': composite,
+            'sector_percentile':    metrics.get('sector_percentile'),
         })
 
     print(f"\n💾 Writing {len(updates)} records to Supabase...")
@@ -287,6 +309,7 @@ def main():
                         'bz_streak':             row['bz_streak'],
                         'gc_crossover_date':     row['gc_crossover_date'],
                         'sector_composite_pct':  row['sector_composite_pct'],
+                        'sector_percentile':     row['sector_percentile'],
                     })\
                     .eq('ticker', row['ticker'])\
                     .eq('snapshot_date', row['snapshot_date'])\
