@@ -129,7 +129,7 @@ def consecutive_improving(series: list, n: int = 3) -> bool:
 # SIGNAL SCORERS
 # =============================================================================
 
-def score_bz_buy(hist: list, rs_rank) -> float:
+def score_bz_buy(hist: list, rs_rank, ticker_rank_hist: list = None) -> float:
     """
     Blue Zone Buy — 5 conditions:
       rsi_ema_9 >= 65, weekly_rsi_ema_9 >= 55,
@@ -156,6 +156,27 @@ def score_bz_buy(hist: list, rs_rank) -> float:
 
     if rank_ok and rsi_d_ok and rsi_w_ok and ema20_ok and w52_ok:
         return 0.0  # already triggered
+
+    # Rank gate: either already within threshold, or rank is improving toward it
+    # Use daily_stock_snapshots rank history (more reliable than historical_snapshots)
+    rank_series = ticker_rank_hist or [r.get('rs_rank') for r in hist if r.get('rs_rank') is not None]
+    rank_improving = False
+    if len(rank_series) >= 3:
+        recent = rank_series[-5:]
+        if len(recent) >= 2:
+            slope = (recent[-1] - recent[0]) / len(recent)
+            # Required slope: must be able to reach rank 125 within 10 trading days
+            required_slope = (rs_rank - RANK_THRESHOLD) / 10.0
+            rank_improving = slope < -required_slope  # improving fast enough
+
+    if rs_rank is None:
+        return 0.0
+    if rs_rank > RANK_THRESHOLD and not rank_improving:
+        # Outside threshold and not improving — exclude
+        return 0.0
+    if rs_rank > RANK_THRESHOLD * 2:
+        # Way too far (rank > 250) even if improving — exclude
+        return 0.0
 
     # Gate: at least 3 indicator conditions passing
     if sum([rsi_d_ok, rsi_w_ok, ema20_ok, w52_ok]) < 3:
@@ -206,7 +227,7 @@ def score_bz_buy(hist: list, rs_rank) -> float:
     return round(min(100.0, score), 1)
 
 
-def score_bz_strong(hist: list, rs_rank) -> float:
+def score_bz_strong(hist: list, rs_rank, ticker_rank_hist: list = None) -> float:
     """
     Blue Zone Strong = BZ Buy + rsi_ema_9>=72, weekly_rsi_ema_9>=65, vol_ratio>=1.5
     Gate: at least 3 of 5 indicator conditions already passing.
@@ -230,6 +251,23 @@ def score_bz_strong(hist: list, rs_rank) -> float:
     vol_ok   = vol_ratio is not None and vol_ratio >= 1.5
 
     if rank_ok and rsi_d_ok and rsi_w_ok and ema20_ok and w52_ok and vol_ok:
+        return 0.0
+
+    # Rank gate: either within threshold or improving toward it
+    rank_series_s = ticker_rank_hist or [r.get('rs_rank') for r in hist if r.get('rs_rank') is not None]
+    rank_improving_s = False
+    if len(rank_series_s) >= 3:
+        recent_s = rank_series_s[-5:]
+        if len(recent_s) >= 2:
+            slope_s = (recent_s[-1] - recent_s[0]) / len(recent_s)
+            required_slope_s = (rs_rank - RANK_THRESHOLD) / 10.0
+            rank_improving_s = slope_s < -required_slope_s
+
+    if rs_rank is None:
+        return 0.0
+    if rs_rank > RANK_THRESHOLD and not rank_improving_s:
+        return 0.0
+    if rs_rank > RANK_THRESHOLD * 2:
         return 0.0
 
     if sum([rsi_d_ok, rsi_w_ok, ema20_ok, w52_ok, vol_ok]) < 3:
@@ -454,29 +492,46 @@ def main():
     for row in history:
         by_ticker[row['ticker']].append(row)
 
-    # ── Fetch today's rs_rank from daily_stock_snapshots (ranker writes here) ──
-    print("\n🏆 Fetching today\'s RS ranks from daily_stock_snapshots...")
+    # ── Fetch rank history from daily_stock_snapshots (last 10 days) ──────────
+    print("\n🏆 Fetching RS rank history from daily_stock_snapshots...")
+    rank_since = (datetime.strptime(today, '%Y-%m-%d') - timedelta(days=10)).strftime('%Y-%m-%d')
 
-    def rank_filters(q):
-        return (q.eq('snapshot_date', today)
+    def rank_hist_filters(q):
+        return (q.gte('snapshot_date', rank_since)
+                 .lte('snapshot_date', today)
                  .not_.is_('rs_rank', 'null')
-                 .neq('ticker', 'NIFTY50.NS'))
+                 .neq('ticker', 'NIFTY50.NS')
+                 .order('snapshot_date', desc=False))
 
     rank_rows = paginated_fetch(
         supabase, 'daily_stock_snapshots',
-        'ticker, rs_rank, sector_percentile, alkalyme_rs',
-        rank_filters
+        'ticker, snapshot_date, rs_rank, sector_percentile, alkalyme_rs',
+        rank_hist_filters
     )
-    today_ranks = {r['ticker']: r for r in rank_rows}
-    print(f"  Fetched ranks for {len(today_ranks)} tickers")
 
-    # Merge today\'s rank into the latest row of each ticker\'s history
+    today_ranks = {}
+    rank_history_by_ticker = defaultdict(list)
+    for r in rank_rows:
+        rank_history_by_ticker[r['ticker']].append(r['rs_rank'])
+        if r['snapshot_date'] == today:
+            today_ranks[r['ticker']] = r
+    # Fallback: use most recent available if no today entry
+    latest_by_ticker = {}
+    for r in sorted(rank_rows, key=lambda x: x['snapshot_date'], reverse=True):
+        if r['ticker'] not in latest_by_ticker:
+            latest_by_ticker[r['ticker']] = r
+    for ticker, r in latest_by_ticker.items():
+        if ticker not in today_ranks:
+            today_ranks[ticker] = r
+
+    print(f"  Fetched rank history for {len(rank_history_by_ticker)} tickers")
+
+    # Merge latest rank into the last row of each ticker's history
     for ticker, hist in by_ticker.items():
         if hist and ticker in today_ranks:
             rank_data = today_ranks[ticker]
-            hist[-1]['rs_rank']         = rank_data.get('rs_rank')
+            hist[-1]['rs_rank']           = rank_data.get('rs_rank')
             hist[-1]['sector_percentile'] = rank_data.get('sector_percentile')
-            # Also update alkalyme_rs with today\'s value if present
             if rank_data.get('alkalyme_rs') is not None:
                 hist[-1]['alkalyme_rs'] = rank_data.get('alkalyme_rs')
 
@@ -516,8 +571,9 @@ def main():
         latest  = hist[-1]
         rs_rank = latest.get('rs_rank')
 
-        s_bz_buy    = score_bz_buy(hist, rs_rank)
-        s_bz_strong = score_bz_strong(hist, rs_rank)
+        ticker_rank_hist = rank_history_by_ticker.get(ticker, [])
+        s_bz_buy    = score_bz_buy(hist, rs_rank, ticker_rank_hist)
+        s_bz_strong = score_bz_strong(hist, rs_rank, ticker_rank_hist)
         s_gc        = score_golden_cross(hist, rs_rank)
         s_macd      = score_macd(hist)
         s_pb        = score_pullback_bounce(hist)
@@ -579,8 +635,16 @@ def main():
     for r in top10:
         rsi  = f"RSI={r['rsi_ema_9']:.1f}" if r['rsi_ema_9'] else "RSI=—"
         rank = f"Rank #{r['rs_rank']}"      if r['rs_rank']  else "Rank=—"
+        # Show rank trajectory
+        hist_r = by_ticker.get(r['ticker'], [])
+        rank_hist = [x.get('rs_rank') for x in hist_r if x.get('rs_rank') is not None]
+        if len(rank_hist) >= 2:
+            chg = rank_hist[-1] - rank_hist[0]
+            trend = f"({'↑' if chg < 0 else '↓'}{abs(chg):.0f} over {len(rank_hist)}d)"
+        else:
+            trend = ''
         print(f"   {r['ticker']:22s}  {r['top_signal']:18s}  "
-              f"score={r['top_rule_score']:5.1f}  {rsi}  {rank}")
+              f"score={r['top_rule_score']:5.1f}  {rsi}  {rank} {trend}")
 
     print(f"\nCompleted: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
