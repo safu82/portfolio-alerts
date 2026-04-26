@@ -572,6 +572,13 @@ def main():
         rs_rank = latest.get('rs_rank')
 
         ticker_rank_hist = rank_history_by_ticker.get(ticker, [])
+
+        # Compute rank slope (negative = improving)
+        rank_slope = None
+        if len(ticker_rank_hist) >= 2:
+            recent_rh = ticker_rank_hist[-5:]
+            rank_slope = round((recent_rh[-1] - recent_rh[0]) / len(recent_rh), 1)
+
         s_bz_buy    = score_bz_buy(hist, rs_rank, ticker_rank_hist)
         s_bz_strong = score_bz_strong(hist, rs_rank, ticker_rank_hist)
         s_gc        = score_golden_cross(hist, rs_rank)
@@ -602,6 +609,7 @@ def main():
             'rule_pullback_bounce': s_pb,
             'top_signal':           top_signal,
             'top_rule_score':       top_score,
+            'rank_slope':           rank_slope,
             'rs_rank':              rs_rank,
             'alkalyme_rs':          latest.get('alkalyme_rs'),
             'rsi_ema_9':            latest.get('rsi_ema_9'),
