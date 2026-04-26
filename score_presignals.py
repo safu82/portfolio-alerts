@@ -180,8 +180,29 @@ def score_bz_buy(hist: list, rs_rank) -> float:
     s_52w   = 100.0 if w52_ok   else proximity_score(ratio_52w,   1.0, True, ratio_52w_s,   max_gap_pct=0.12)
     s_rank  = 100.0 if rank_ok  else proximity_score(rs_rank if rs_rank else 999, RANK_THRESHOLD, False, max_gap_pct=0.30)
 
-    score = (s_rsi_d * 0.30 + s_rsi_w * 0.20 +
-             s_ema20 * 0.20 + s_52w   * 0.20 + s_rank * 0.10)
+    # Tiered scoring: score is driven by how close failing conditions are
+    # Base bonus for passing gates, remainder from failing condition proximity
+    gates_passing = sum([rsi_d_ok, rsi_w_ok, ema20_ok, w52_ok])
+
+    if gates_passing == 4:
+        # Only rank failing — base 85, rank proximity drives remaining 15
+        score = 85.0 + s_rank * 0.15
+    elif gates_passing == 3:
+        # One indicator failing — base 70, failing indicator drives remaining 30
+        # Weight the failing condition score heavily
+        failing_scores = []
+        if not rsi_d_ok: failing_scores.append(s_rsi_d)
+        if not rsi_w_ok: failing_scores.append(s_rsi_w)
+        if not ema20_ok: failing_scores.append(s_ema20)
+        if not w52_ok:   failing_scores.append(s_52w)
+        failing_avg = sum(failing_scores) / len(failing_scores) if failing_scores else 0
+        rank_bonus  = s_rank * 0.05  # small rank bonus
+        score = 70.0 + failing_avg * 0.25 + rank_bonus
+    else:
+        # Fallback — shouldn't reach here due to gate check above
+        score = (s_rsi_d * 0.30 + s_rsi_w * 0.20 +
+                 s_ema20 * 0.20 + s_52w   * 0.20 + s_rank * 0.10)
+
     return round(min(100.0, score), 1)
 
 
@@ -227,8 +248,26 @@ def score_bz_strong(hist: list, rs_rank) -> float:
     s_vol   = 100.0 if vol_ok   else proximity_score(vol_ratio,   1.5, True, vol_s,   max_gap_pct=0.40)
     s_rank  = 100.0 if rank_ok  else proximity_score(rs_rank if rs_rank else 999, RANK_THRESHOLD, False, max_gap_pct=0.30)
 
-    score = (s_rsi_d * 0.25 + s_rsi_w * 0.20 + s_ema20 * 0.15 +
-             s_52w   * 0.15 + s_vol   * 0.15 + s_rank  * 0.10)
+    # Tiered scoring: base for gates passing + failing condition proximity
+    gates_passing = sum([rsi_d_ok, rsi_w_ok, ema20_ok, w52_ok, vol_ok])
+
+    if gates_passing == 5:
+        # Only rank failing
+        score = 85.0 + s_rank * 0.15
+    elif gates_passing >= 3:
+        failing_scores = []
+        if not rsi_d_ok: failing_scores.append(s_rsi_d)
+        if not rsi_w_ok: failing_scores.append(s_rsi_w)
+        if not ema20_ok: failing_scores.append(s_ema20)
+        if not w52_ok:   failing_scores.append(s_52w)
+        if not vol_ok:   failing_scores.append(s_vol)
+        failing_avg = sum(failing_scores) / len(failing_scores) if failing_scores else 0
+        base = 60.0 + (gates_passing - 3) * 10.0  # 60 for 3 gates, 70 for 4 gates
+        score = base + failing_avg * 0.25 + s_rank * 0.05
+    else:
+        score = (s_rsi_d * 0.25 + s_rsi_w * 0.20 + s_ema20 * 0.15 +
+                 s_52w   * 0.15 + s_vol   * 0.15 + s_rank  * 0.10)
+
     return round(min(100.0, score), 1)
 
 
