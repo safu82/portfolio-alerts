@@ -181,7 +181,7 @@ def main():
                  .order('snapshot_date', desc=False))
 
     history_data = paginated_fetch(supabase, 'daily_stock_snapshots',
-                                   'ticker, snapshot_date, close, alkalyme_rs, rsi_ema_9, weekly_rsi_ema_9, ema_20, ema_50, ema_200, high_52w',
+                                   'ticker, snapshot_date, close, alkalyme_rs, rsi_ema_9, weekly_rsi_ema_9, ema_20, ema_50, ema_200, high_52w, rs_rank',
                                    history_filters)
     print(f"  Fetched {len(history_data)} rows across 60 days")
 
@@ -284,6 +284,18 @@ def main():
         ] if v is not None]
         composite = round(sum(v * w for v, w in available) / sum(w for _, w in available), 1) if available else None
 
+        # Compute rank slope from last 5 days of rs_rank history
+        # Use today's assigned rank + previous days from history_by_ticker
+        rank_slope = None
+        ticker_hist = history_by_ticker.get(ticker, [])
+        # Get historical ranks (excluding today which doesn't have rank yet)
+        hist_ranks = [r.get('rs_rank') for r in ticker_hist if r.get('rs_rank') is not None]
+        # Append today's newly assigned rank
+        all_ranks = hist_ranks + [rank]
+        if len(all_ranks) >= 2:
+            recent = all_ranks[-5:]
+            rank_slope = round((recent[-1] - recent[0]) / len(recent), 1)
+
         updates.append({
             'ticker':               ticker,
             'snapshot_date':        today,
@@ -292,6 +304,7 @@ def main():
             'gc_crossover_date':    metrics['gc_crossover_date'],
             'sector_composite_pct': composite,
             'sector_percentile':    metrics.get('sector_percentile'),
+            'rank_slope':           rank_slope,
         })
 
     print(f"\n💾 Writing {len(updates)} records to Supabase...")
@@ -310,6 +323,7 @@ def main():
                         'gc_crossover_date':     row['gc_crossover_date'],
                         'sector_composite_pct':  row['sector_composite_pct'],
                         'sector_percentile':     row['sector_percentile'],
+                        'rank_slope':            row['rank_slope'],
                     })\
                     .eq('ticker', row['ticker'])\
                     .eq('snapshot_date', row['snapshot_date'])\
