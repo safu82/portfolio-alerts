@@ -11,6 +11,12 @@ UPDATED (April 2026):
 - MACD: Bullish crossover, ADX > 25 for Strong Buy, ADX > 20 for Buy (raised from no minimum)
 - Darvas Box: Tight consolidation near 52W high, volume breakout (NEW - Portfolio A)
 - Pullback Bounce: EMA20 touch-and-recover in strong uptrend (NEW - replaces 200 EMA)
+- Bull Flag: Pole ≥15% in 5-15d on vol ≥2x, shallow flag with drying volume (NEW)
+             Strong: pole ≥20%, vol ≥3x, retrace ≤35%, RS rank ≤75
+             Buy:    pole ≥15%, vol ≥2x, retrace ≤50%, RS rank ≤125
+- VCP: Minervini Volatility Contraction Pattern, ≥3 progressively tighter contractions (NEW)
+       Strong: ≥4 contractions, latest depth <10%, vol <50% avg, RS rank ≤75
+       Buy:    ≥3 contractions, latest depth <15%, vol <60% avg, RS rank ≤125
 - 200 EMA two-stage: DEPRECATED (removed)
 - Promoter Buying: DEPRECATED (Trendlyne scraping unreliable from cloud IPs)
 
@@ -553,6 +559,295 @@ def check_pullback_bounce(daily_df: pd.DataFrame, current_price: float) -> Optio
         return None
 
 # ============================================
+# BULL FLAG & VCP HELPERS
+# ============================================
+
+def find_contractions(df: pd.DataFrame, lookback: int = 80) -> list:
+    """
+    Identify price contractions (local high-to-low swings) in the last `lookback` rows.
+    Returns list of dicts: {high, low, depth_pct, avg_volume, start_idx, end_idx}
+    """
+    window = df.iloc[-lookback:].reset_index(drop=True)
+    highs = window['high'].values
+    lows  = window['low'].values
+    vols  = window['volume'].values
+    n     = len(window)
+
+    contractions = []
+    i = 0
+    while i < n - 5:
+        # Find local high
+        local_high = highs[i]
+        high_idx   = i
+        for j in range(i + 1, min(i + 20, n)):
+            if highs[j] > local_high:
+                local_high = highs[j]
+                high_idx   = j
+            elif highs[j] < local_high * 0.97:
+                break
+
+        # Find subsequent low
+        local_low = lows[high_idx]
+        low_idx   = high_idx
+        for j in range(high_idx + 1, min(high_idx + 30, n)):
+            if lows[j] < local_low:
+                local_low = lows[j]
+                low_idx   = j
+            elif lows[j] > local_low * 1.05:
+                break
+
+        if low_idx > high_idx and local_high > 0:
+            depth_pct = (local_high - local_low) / local_high * 100
+            avg_vol   = float(np.mean(vols[high_idx:low_idx + 1]))
+            if depth_pct > 2.0:
+                contractions.append({
+                    'high':       local_high,
+                    'low':        local_low,
+                    'depth_pct':  round(depth_pct, 1),
+                    'avg_volume': avg_vol,
+                    'start_idx':  high_idx,
+                    'end_idx':    low_idx,
+                })
+        i = low_idx + 1 if low_idx > i else i + 1
+
+    return contractions
+
+
+def check_bull_flag(daily_df: pd.DataFrame, current_price: float) -> Optional[Dict]:
+    """
+    Bull Flag — momentum continuation pattern.
+
+    POLE: stock rose 15%+ in 5-15 days on volume > 2x avg
+    FLAG: 3-15 day shallow consolidation (≤ 50% retrace), volume drying to < 70% of pole vol
+    EMA stack: EMA20 > EMA50 > EMA200
+    52W proximity: within 10% of high
+    RS rank ≤ 125
+
+    Strong: pole ≥ 20%, pole vol ≥ 3x, retrace ≤ 35%, RS rank ≤ 75
+    Buy:    pole ≥ 15%, pole vol ≥ 2x, retrace ≤ 50%, RS rank ≤ 125
+    """
+    if len(daily_df) < 40:
+        return None
+    try:
+        latest   = daily_df.iloc[-1]
+        e20      = latest.get('ema_20')
+        e50      = latest.get('ema_50')
+        e200     = latest.get('ema_200')
+        high_52w = latest.get('high_52w')
+        rs_rank  = latest.get('rs_rank')
+
+        if pd.isna(e20) or pd.isna(e50) or pd.isna(e200):
+            return None
+        if not (e20 > e50 > e200):
+            return None
+        if pd.isna(high_52w) or high_52w <= 0:
+            return None
+        dist_52w = (current_price - high_52w) / high_52w * 100
+        if dist_52w < -10.0:
+            return None
+
+        close  = daily_df['close'].values
+        volume = daily_df['volume'].values
+        n      = len(daily_df)
+
+        # Volume baseline: 20-day avg excluding last 10 days (avoid pole/flag contamination)
+        vol_baseline = float(np.nanmean(volume[-30:-10])) if len(volume) > 30 else float(np.nanmean(volume))
+        if vol_baseline <= 0:
+            return None
+
+        # Search flag (3-15 days) then pole (5-15 days) before it
+        for flag_days in range(3, min(16, n - 5)):
+            flag_s     = daily_df.iloc[-flag_days:]
+            flag_high  = flag_s['high'].max()
+            flag_low   = flag_s['low'].min()
+            flag_close = flag_s.iloc[-1]['close']
+            flag_vol   = float(flag_s['volume'].mean())
+
+            # Flag volume must be drying up
+            if flag_vol >= 0.70 * vol_baseline:
+                continue
+
+            # Price above EMA20 throughout flag (2% tolerance)
+            if flag_low < flag_s['ema_20'].min() * 0.98:
+                continue
+
+            # Today's close in upper 40% of flag range
+            flag_range = flag_high - flag_low
+            if flag_range <= 0:
+                continue
+            close_pos = (flag_close - flag_low) / flag_range
+            if close_pos < 0.40:
+                continue
+
+            # Search pole
+            flag_start = n - flag_days
+            for pole_days in range(5, min(16, flag_start)):
+                pole_s     = daily_df.iloc[flag_start - pole_days:flag_start]
+                pole_open  = float(pole_s.iloc[0]['close'])
+                pole_close = float(pole_s.iloc[-1]['close'])
+                if pole_open <= 0:
+                    continue
+                pole_gain = (pole_close - pole_open) / pole_open * 100
+                if pole_gain < 15.0:
+                    continue
+
+                pole_vol = float(pole_s['volume'].mean())
+                if pole_vol < 2.0 * vol_baseline:
+                    continue
+
+                pole_move    = pole_close - pole_open
+                flag_retrace = (pole_close - flag_low) / pole_move * 100 if pole_move > 0 else 999
+                if flag_retrace > 50.0:
+                    continue
+
+                # Grade
+                in_top_rs = (pd.isna(rs_rank) or int(rs_rank) <= 75)
+                if (pole_gain >= 20.0 and pole_vol >= 3.0 * vol_baseline
+                        and flag_retrace <= 35.0 and in_top_rs):
+                    signal_strength = 'strong'
+                    signal_type     = 'bull_flag_strong'
+                else:
+                    signal_strength = 'regular'
+                    signal_type     = 'bull_flag_buy'
+
+                return {
+                    'signal_type':       signal_type,
+                    'signal_strength':   signal_strength,
+                    'pole_days':         pole_days,
+                    'pole_gain_pct':     round(pole_gain, 1),
+                    'pole_vol_ratio':    round(pole_vol / vol_baseline, 2),
+                    'flag_days':         flag_days,
+                    'flag_retrace_pct':  round(flag_retrace, 1),
+                    'flag_vol_ratio':    round(flag_vol / vol_baseline, 2),
+                    'flag_high':         round(flag_high, 2),
+                    'flag_low':          round(flag_low, 2),
+                    'close_pos_in_flag': round(close_pos * 100, 0),
+                    'dist_from_52w':     round(dist_52w, 1),
+                    'ema_20':            round(e20, 2),
+                    'ema_50':            round(e50, 2),
+                }
+    except Exception:
+        return None
+    return None
+
+
+def check_vcp(daily_df: pd.DataFrame, current_price: float) -> Optional[Dict]:
+    """
+    VCP (Volatility Contraction Pattern) — Minervini's setup.
+
+    Stage 2 uptrend: above EMA50 > EMA200, EMA20 > EMA50
+    EMA50 rising for 4 weeks
+    ≥ 3 progressively tighter contractions (each ≥ 25% tighter than prior)
+    Latest contraction depth < 15%
+    Price within 5% of contraction high (pivot)
+    Current volume < 60% of 50-day avg (dry)
+    Within 25% of 52W high
+
+    Strong: ≥ 4 contractions, latest depth < 10%, vol < 50% of avg, RS rank ≤ 75
+    Buy:    ≥ 3 contractions, latest depth < 15%, vol < 60% of avg, RS rank ≤ 125
+    """
+    if len(daily_df) < 80:
+        return None
+    try:
+        latest   = daily_df.iloc[-1]
+        e20      = latest.get('ema_20')
+        e50      = latest.get('ema_50')
+        e200     = latest.get('ema_200')
+        high_52w = latest.get('high_52w')
+        rs_rank  = latest.get('rs_rank')
+
+        if pd.isna(e20) or pd.isna(e50) or pd.isna(e200):
+            return None
+
+        # Stage 2: above EMA50>EMA200 with EMA20>EMA50
+        if not (current_price > e50 and e50 > e200 and e20 > e50):
+            return None
+
+        # EMA50 rising for 4 weeks
+        if len(daily_df) >= 21:
+            old_e50 = daily_df.iloc[-20].get('ema_50')
+            if pd.notna(old_e50) and e50 <= old_e50:
+                return None
+
+        # 52W proximity
+        if pd.isna(high_52w) or high_52w <= 0:
+            return None
+        dist_52w = (current_price - high_52w) / high_52w * 100
+        if dist_52w < -25.0:
+            return None
+
+        # Volume dry-up
+        vol_50_avg  = float(daily_df['volume'].tail(50).mean())
+        current_vol = float(latest['volume'])
+        vol_ratio   = current_vol / vol_50_avg if vol_50_avg > 0 else 1.0
+        if vol_ratio > 0.60:
+            return None
+
+        # Find contractions
+        contractions = find_contractions(daily_df, lookback=80)
+        if len(contractions) < 3:
+            return None
+
+        # Build valid progressively tighter sequence
+        valid_seq = []
+        for c in contractions:
+            if not valid_seq:
+                valid_seq.append(c)
+            else:
+                prev = valid_seq[-1]
+                if (c['depth_pct'] <= prev['depth_pct'] * 0.75 and
+                        c['low'] >= prev['low'] * 0.98):
+                    valid_seq.append(c)
+                else:
+                    if len(valid_seq) >= 3:
+                        break
+                    valid_seq = [c]
+
+        if len(valid_seq) < 3:
+            return None
+
+        latest_c = valid_seq[-1]
+        pivot    = latest_c['high']
+        dist_pivot = (current_price - pivot) / pivot * 100
+
+        # Price within 5% below pivot (or up to 2% above — breakout in progress)
+        if dist_pivot < -5.0 or dist_pivot > 2.0:
+            return None
+
+        # Grade
+        in_top_rs = (pd.isna(rs_rank) or int(rs_rank) <= 75)
+        if (len(valid_seq) >= 4 and latest_c['depth_pct'] < 10.0
+                and vol_ratio < 0.50 and in_top_rs):
+            signal_strength = 'strong'
+            signal_type     = 'vcp_strong'
+        else:
+            signal_strength = 'regular'
+            signal_type     = 'vcp_buy'
+
+        vols_in_seq = [c['avg_volume'] for c in valid_seq]
+        vol_contracting = all(vols_in_seq[i] >= vols_in_seq[i + 1] * 0.90
+                              for i in range(len(vols_in_seq) - 1))
+
+        return {
+            'signal_type':          signal_type,
+            'signal_strength':      signal_strength,
+            'num_contractions':     len(valid_seq),
+            'contraction_depths':   [c['depth_pct'] for c in valid_seq],
+            'latest_depth_pct':     latest_c['depth_pct'],
+            'pivot_level':          round(pivot, 2),
+            'dist_from_pivot_pct':  round(dist_pivot, 1),
+            'dist_from_52w_pct':    round(dist_52w, 1),
+            'current_vol_ratio':    round(vol_ratio, 2),
+            'vol_contracting':      vol_contracting,
+            'ema_20':               round(e20, 2),
+            'ema_50':               round(e50, 2),
+            'ema_200':              round(e200, 2),
+        }
+    except Exception:
+        return None
+
+
+# ============================================
 # SCAN SINGLE STOCK
 # ============================================
 
@@ -586,6 +881,8 @@ def scan_stock(supabase: Client, ticker: str) -> List[Dict]:
             check_macd_signal,
             check_darvas_box,
             check_pullback_bounce,
+            check_bull_flag,
+            check_vcp,
         ]
 
         for check_fn in checks:
@@ -673,7 +970,7 @@ def main():
     print("=" * 80)
     print("🔍 ENTRY SIGNALS SCANNER")
     print("=" * 80)
-    print(f"Signals: Narrow CPR | Blue Zone | Golden Cross | MACD | Darvas Box | Pullback Bounce")
+    print(f"Signals: Narrow CPR | Blue Zone | Golden Cross | MACD | Darvas Box | Pullback Bounce | Bull Flag | VCP")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     supabase = init_supabase()
@@ -743,6 +1040,10 @@ def main():
         'macd_buy': 0,
         'darvas_box': 0,
         'pullback_bounce': 0,
+        'bull_flag_strong': 0,
+        'bull_flag_buy': 0,
+        'vcp_strong': 0,
+        'vcp_buy': 0,
     }
 
     emoji_map = {
@@ -755,6 +1056,10 @@ def main():
         'macd_buy': '📊',
         'darvas_box': '📦',
         'pullback_bounce': '🔄',
+        'bull_flag_strong': '🚩🚩',
+        'bull_flag_buy': '🚩',
+        'vcp_strong': '📉📉',
+        'vcp_buy': '📉',
     }
 
     label_map = {
@@ -767,6 +1072,10 @@ def main():
         'macd_buy': 'MACD BUY',
         'darvas_box': 'DARVAS BOX',
         'pullback_bounce': 'PULLBACK BOUNCE',
+        'bull_flag_strong': 'BULL FLAG STRONG',
+        'bull_flag_buy': 'BULL FLAG BUY',
+        'vcp_strong': 'VCP STRONG',
+        'vcp_buy': 'VCP BUY',
     }
 
     for i, ticker in enumerate(tickers, 1):
@@ -777,7 +1086,9 @@ def main():
                   f"GC:{signal_counts['golden_cross_strong']+signal_counts['golden_cross_buy']} "
                   f"MACD:{signal_counts['macd_strong']+signal_counts['macd_buy']} "
                   f"Darvas:{signal_counts['darvas_box']} "
-                  f"PB:{signal_counts['pullback_bounce']}")
+                  f"PB:{signal_counts['pullback_bounce']} "
+                  f"BF:{signal_counts['bull_flag_strong']+signal_counts['bull_flag_buy']} "
+                  f"VCP:{signal_counts['vcp_strong']+signal_counts['vcp_buy']}")
 
         for signal in scan_stock(supabase, ticker):
             all_signals.append(signal)
@@ -805,6 +1116,8 @@ def main():
     print(f"  📊 MACD:           {signal_counts['macd_strong']} Strong + {signal_counts['macd_buy']} Buy")
     print(f"  📦 Darvas Box:     {signal_counts['darvas_box']}")
     print(f"  🔄 Pullback Bounce:{signal_counts['pullback_bounce']}")
+    print(f"  🚩 Bull Flag:      {signal_counts['bull_flag_strong']} Strong + {signal_counts['bull_flag_buy']} Buy")
+    print(f"  📉 VCP:            {signal_counts['vcp_strong']} Strong + {signal_counts['vcp_buy']} Buy")
     print(f"  📍 Total:          {len(all_signals)}")
     print(f"  🔍 RS filter:      top 25% only (rank ≤ 125) — signals above are post-filter")
     print(f"\nCompleted: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
