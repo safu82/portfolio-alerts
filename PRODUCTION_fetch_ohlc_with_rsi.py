@@ -26,12 +26,24 @@ DAYS_HISTORY      = 365
 RATE_LIMIT_DELAY  = 1.0
 
 TICKER_MAPPING = {
-    'KPENERGY.NS': 'KPEL',
-    'TRIL.NS':     'TARIL',
-    'GENUSPOWER.NS': 'GENUSPOWER',
-    'DENTAWATER.NS': 'DENTA',
-    'NARMP.BO':    'NARMP'
+    'TRIL.NS':              'TARIL',
+    'GENUSPOWER.NS':        'GENUSPOWER',
+    'DENTAWATER.NS':        'DENTA',
+    'NARMP.BO':             'NARMP',
+    # Portfolio extras — non-Nifty500 holdings
+    'KPEL.NS':              'KPEL',
+    'ASHAPURMIN.NS':        'ASHAPURMIN',
+    'ELECTCAST.NS':         'ELECTCAST',
+    'PGEL.NS':              'PGEL',
 }
+
+# Portfolio stocks outside Nifty 500 — fetched after the main scan
+PORTFOLIO_EXTRA_TICKERS = [
+    'KPEL.NS',
+    'ASHAPURMIN.NS',
+    'ELECTCAST.NS',
+    'PGEL.NS',
+]
 
 NIFTY_500_TICKERS = [
     'DELHIVERY.NS', 'CASTROLIND.NS', 'SARDAEN.NS', 'GODIGIT.NS', 'PNCINFRA.NS',
@@ -141,7 +153,7 @@ NIFTY_500_TICKERS = [
     'GMMPFAUDLR.NS', 'GREENPANEL.NS', 'GUJALKALI.NS', 'GULFOILLUB.NS',
     'HATHWAY.NS', 'HATSUN.NS', 'HEIDELBERG.NS', 'HEMIPROP.NS', 'IDFC.NS',
     'IFBIND.NS', 'IGARASHI.NS', 'INDOCO.NS', 'INDOSTAR.NS', 'INFIBEAM.NS',
-    'JAMNAAUTO.NS', 'JKPAPER.NS', 'KIOCL.NS', 'KPENERGY.NS', 'KPIGREEN.NS',
+    'JAMNAAUTO.NS', 'JKPAPER.NS', 'KIOCL.NS', 'KPEL.NS', 'KPIGREEN.NS',
     'KRBL.NS', 'KSCL.NS', 'LAXMIMACH.NS', 'LXCHEM.NS', 'MAHINDCIE.NS',
     'MAHLOG.NS', 'MCDOWELL-N.NS', 'MHRIL.NS', 'MIDHANI.NS', 'MINDAIND.NS',
     'MOIL.NS', 'NEULANDLAB.NS', 'NIITLTD.NS', 'NOCIL.NS', 'OMAXE.NS',
@@ -500,6 +512,26 @@ def main():
                 print(f"  ❌ {ticker}: {e}")
         else:
             failed += 1
+        time.sleep(RATE_LIMIT_DELAY)
+
+    # ── Portfolio extras (non-Nifty500 holdings) ──────────────────────────────
+    print(f"\n📋 Fetching {len(PORTFOLIO_EXTRA_TICKERS)} portfolio extra stocks...")
+    for ticker in PORTFOLIO_EXTRA_TICKERS:
+        records = fetch_and_calculate_ohlc(kite, ticker, nifty_closes)
+        if records:
+            try:
+                supabase.table('daily_stock_snapshots').upsert(records, on_conflict='ticker,snapshot_date').execute()
+                supabase.table('historical_snapshots').upsert(records, on_conflict='ticker,snapshot_date').execute()
+                total_records += len(records)
+                successful    += 1
+                latest = records[-1]
+                print(f"  ✅ {ticker:25} | close: {latest['close']} | RSI EMA9: {latest['rsi_ema_9']}")
+            except Exception as e:
+                failed += 1
+                print(f"  ❌ {ticker}: {e}")
+        else:
+            failed += 1
+            print(f"  ⚠️  {ticker}: no data returned")
         time.sleep(RATE_LIMIT_DELAY)
 
     cleanup_old_data(supabase, days_to_keep=60)
