@@ -41,7 +41,7 @@ warnings.filterwarnings('ignore')
 
 SUPABASE_URL    = os.getenv('SUPABASE_URL',    'https://hcgyncghmcvylnrmcivj.supabase.co')
 SUPABASE_KEY    = os.getenv('SUPABASE_KEY',    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjZ3luY2dobWN2eWxucm1jaXZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc1MTQwMTEsImV4cCI6MjA3MzA5MDAxMX0.n8vFVCJe1y_3o8fpAY0IgasZ4eKl7DAogEM3OlHB8Ww')
-ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '')
+ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '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')
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -793,19 +793,14 @@ def check_post_earnings_declarations():
         latest_screener_period = quarters[0].get('period')
 
         if db_latest_period is None:
-            # No previous data — store what Screener has but don't mark declared yet.
-            # Next run will compare properly.
-            print(f"    📥 No prior data in DB — storing {latest_screener_period} as baseline (not declaring)")
-            try:
-                supabase.table('stock_fundamentals').upsert(
-                    {'ticker': ticker, 'quarterly_financials': quarters},
-                    on_conflict='ticker'
-                ).execute()
-            except Exception as e:
-                print(f"    ⚠️ Baseline store error: {e}")
-            continue
+            # No prior quarterly data in DB. Declare directly using Screener data.
+            # Do NOT store to stock_fundamentals here — the declaration block below handles that.
+            print(f"    ✅ No prior DB data — treating {latest_screener_period} as new results")
+            # Skip the "no new quarter" check by jumping straight to declaration
+            # We do this by pretending db_latest_period is a dummy value
+            db_latest_period = '__NONE__'
 
-        if latest_screener_period == db_latest_period:
+        if latest_screener_period == db_latest_period and db_latest_period != '__NONE__':
             print(f"    ⏳ No new quarter yet (still showing {db_latest_period})")
             continue
 
@@ -826,13 +821,14 @@ def check_post_earnings_declarations():
             print(f"    ⚠️ stock_fundamentals update error: {e}")
 
         # Generate Haiku commentary
+        print(f"    📊 Screener returned {len(quarters)} quarters, latest: {quarters[0].get('period') if quarters else 'none'}")
         latest       = quarters[0] if len(quarters) > 0 else {}
         prev_quarter = quarters[1] if len(quarters) > 1 else {}
         year_ago     = quarters[4] if len(quarters) > 4 else {}
+        print(f"    📊 latest={latest.get('revenue')} prev={prev_quarter.get('revenue')} year_ago={year_ago.get('revenue')}")
         commentary   = generate_commentary(stock_name, latest_screener_period or entry['quarter'],
                                            latest, prev_quarter, year_ago)
-        if commentary:
-            print(f"    💬 Commentary generated")
+        print(f"    💬 Commentary result: '{commentary[:80] if commentary else 'EMPTY'}'")
 
         # Fetch PDF insights
         pdf_url    = latest.get('pdf_url', '')
