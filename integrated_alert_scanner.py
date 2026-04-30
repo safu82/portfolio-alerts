@@ -821,14 +821,13 @@ def check_post_earnings_declarations():
             print(f"    ⚠️ stock_fundamentals update error: {e}")
 
         # Generate Haiku commentary
-        print(f"    📊 Screener returned {len(quarters)} quarters, latest: {quarters[0].get('period') if quarters else 'none'}")
         latest       = quarters[0] if len(quarters) > 0 else {}
         prev_quarter = quarters[1] if len(quarters) > 1 else {}
         year_ago     = quarters[4] if len(quarters) > 4 else {}
-        print(f"    📊 latest={latest.get('revenue')} prev={prev_quarter.get('revenue')} year_ago={year_ago.get('revenue')}")
         commentary   = generate_commentary(stock_name, latest_screener_period or entry['quarter'],
                                            latest, prev_quarter, year_ago)
-        print(f"    💬 Commentary result: '{commentary[:80] if commentary else 'EMPTY'}'")
+        if commentary:
+            print(f"    💬 Commentary generated")
 
         # Fetch PDF insights
         pdf_url    = latest.get('pdf_url', '')
