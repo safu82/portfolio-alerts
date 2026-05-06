@@ -1,3 +1,3 @@
 [build]
-  command = "echo done"
-  publish = "."
+  command = ""
+  publish = "dashboard"
