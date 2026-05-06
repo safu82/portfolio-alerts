@@ -1,3 +1,7 @@
 [build]
   command = ""
   publish = "."
+  ignore = "exit 0"
+
+[build.environment]
+  PYTHON_VERSION = ""
