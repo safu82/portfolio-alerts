@@ -15,7 +15,7 @@ Changes from v1:
   - MIN_SCORE raised: 40 → 60
 
 Signals scored:
-  bz_buy, bz_strong, golden_cross, macd, pullback_bounce
+  bz_buy, bz_strong, golden_cross, macd, pullback_bounce, rs_acceleration
 
 Schedule: Daily at 6:15 PM IST (after alkalyme_rs_ranker)
 Runtime: ~2 minutes
@@ -31,7 +31,7 @@ from supabase import create_client
 SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://hcgyncghmcvylnrmcivj.supabase.co')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjZ3luY2dobWN2eWxucm1jaXZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc1MTQwMTEsImV4cCI6MjA3MzA5MDAxMX0.n8vFVCJe1y_3o8fpAY0IgasZ4eKl7DAogEM3OlHB8Ww')
 
-HISTORY_DAYS   = 20
+HISTORY_DAYS   = 30
 MIN_SCORE      = 70
 RANK_THRESHOLD = 125
 
@@ -443,6 +443,68 @@ def score_pullback_bounce(hist: list) -> float:
     return round(min(100.0, base + vol_bonus), 1)
 
 
+def score_rs_acceleration(hist: list, rs_rank, ticker_rank_hist: list = None,
+                           rs_30d_high: bool = False) -> float:
+    """
+    RS Rank Acceleration pre-signal.
+
+    Identifies stocks aggressively climbing into RS leadership before they break
+    out on price. Distinct from BZ/GC/MACD which require trend already in place.
+
+    Hard gates (all required, else score = 0):
+      1. rs_rank <= 200 (must be at least within the top 40%)
+      2. rank_slope <= -3 (rank improving by >=3 positions/day over last 5 days)
+      3. close > ema_50 (trend filter)
+      4. alkalyme_rs >= 55 (minimum credible RS level)
+
+    Score:
+      base   = min(100, |rank_slope| * 8)        # slope -12.5/day -> 100
+      + 15 if alkalyme_rs is at fresh 30-day high
+      + 10 if alkalyme_rs >= 72, +5 if >= 65
+      +  5 if vol_ratio >= 1.5
+      capped at 100
+    """
+    if not hist or rs_rank is None:
+        return 0.0
+    if rs_rank > 200:
+        return 0.0
+
+    latest    = hist[-1]
+    close     = latest.get('close')
+    ema_50    = latest.get('ema_50')
+    rs        = latest.get('alkalyme_rs')
+    vol_ratio = latest.get('vol_ratio')
+
+    if close is None or ema_50 is None or close <= ema_50:
+        return 0.0
+    if rs is None or rs < 55:
+        return 0.0
+
+    # Compute rank slope (negative = improving toward rank 1)
+    rank_series = ticker_rank_hist or [r.get('rs_rank') for r in hist if r.get('rs_rank') is not None]
+    if len(rank_series) < 2:
+        return 0.0
+    recent = rank_series[-5:]
+    slope  = (recent[-1] - recent[0]) / len(recent)
+    if slope > -3.0:
+        return 0.0  # not improving fast enough
+
+    base = min(100.0, abs(slope) * 8.0)
+
+    fresh_high_bonus = 15.0 if rs_30d_high else 0.0
+
+    if rs >= 72:
+        rs_bonus = 10.0
+    elif rs >= 65:
+        rs_bonus = 5.0
+    else:
+        rs_bonus = 0.0
+
+    vol_bonus = 5.0 if (vol_ratio is not None and vol_ratio >= 1.5) else 0.0
+
+    return round(min(100.0, base + fresh_high_bonus + rs_bonus + vol_bonus), 1)
+
+
 # =============================================================================
 # MAIN
 # =============================================================================
@@ -579,11 +641,17 @@ def main():
             recent_rh = ticker_rank_hist[-5:]
             rank_slope = round((recent_rh[-1] - recent_rh[0]) / len(recent_rh), 1)
 
+        # Fresh 30-day RS high check — used by rs_acceleration scorer + chip
+        rs_history = [r.get('alkalyme_rs') for r in hist if r.get('alkalyme_rs') is not None]
+        rs_today   = latest.get('alkalyme_rs')
+        rs_30d_high = bool(rs_history and rs_today is not None and rs_today >= max(rs_history))
+
         s_bz_buy    = score_bz_buy(hist, rs_rank, ticker_rank_hist)
         s_bz_strong = score_bz_strong(hist, rs_rank, ticker_rank_hist)
         s_gc        = score_golden_cross(hist, rs_rank)
         s_macd      = score_macd(hist)
         s_pb        = score_pullback_bounce(hist)
+        s_rs_accel  = score_rs_acceleration(hist, rs_rank, ticker_rank_hist, rs_30d_high)
 
         signal_scores = {
             'bz_buy':          s_bz_buy,
@@ -591,6 +659,7 @@ def main():
             'golden_cross':    s_gc,
             'macd':            s_macd,
             'pullback_bounce': s_pb,
+            'rs_acceleration': s_rs_accel,
         }
         top_signal = max(signal_scores, key=signal_scores.get)
         top_score  = signal_scores[top_signal]
@@ -600,24 +669,26 @@ def main():
 
         stats[top_signal] += 1
         records.append({
-            'ticker':               ticker,
-            'score_date':           score_date,
-            'rule_bz_buy':          s_bz_buy,
-            'rule_bz_strong':       s_bz_strong,
-            'rule_golden_cross':    s_gc,
-            'rule_macd':            s_macd,
-            'rule_pullback_bounce': s_pb,
-            'top_signal':           top_signal,
-            'top_rule_score':       top_score,
-            'rank_slope':           rank_slope,
-            'rs_rank':              rs_rank,
-            'alkalyme_rs':          latest.get('alkalyme_rs'),
-            'rsi_ema_9':            latest.get('rsi_ema_9'),
-            'weekly_rsi_ema_9':     latest.get('weekly_rsi_ema_9'),
-            'close':                latest.get('close'),
-            'ema_20':               latest.get('ema_20'),
-            'ema_50':               latest.get('ema_50'),
-            'vol_ratio':            latest.get('vol_ratio'),
+            'ticker':                ticker,
+            'score_date':            score_date,
+            'rule_bz_buy':           s_bz_buy,
+            'rule_bz_strong':        s_bz_strong,
+            'rule_golden_cross':     s_gc,
+            'rule_macd':             s_macd,
+            'rule_pullback_bounce':  s_pb,
+            'rule_rs_acceleration':  s_rs_accel,
+            'top_signal':            top_signal,
+            'top_rule_score':        top_score,
+            'rank_slope':            rank_slope,
+            'rs_rank':               rs_rank,
+            'alkalyme_rs':           rs_today,
+            'rs_30d_high':           rs_30d_high,
+            'rsi_ema_9':             latest.get('rsi_ema_9'),
+            'weekly_rsi_ema_9':      latest.get('weekly_rsi_ema_9'),
+            'close':                 latest.get('close'),
+            'ema_20':                latest.get('ema_20'),
+            'ema_50':                latest.get('ema_50'),
+            'vol_ratio':             latest.get('vol_ratio'),
         })
 
     print(f"  Stocks with score >= {MIN_SCORE}: {len(records)}")
