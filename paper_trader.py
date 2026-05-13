@@ -1,33 +1,49 @@
 #!/usr/bin/env python3
 """
-Paper Trading Executor (Strategy v2)
-=====================================
+Paper Trading Executor (Strategy v3 — Conviction Stack)
+========================================================
 Daily simulation of an algorithmic strategy on top of the existing signal
 infrastructure. NO real orders are placed — every trade is logged to
 `paper_trades` with mode='paper'.
 
-Strategy:
-  - Confluence entries: >=2 distinct signal families from
-    presignal_scores + entry_signals (within a 2-trading-day window).
-  - Family dedupe: e.g. bz_buy + bz_strong = 1 family at strong tier.
-  - Tiering drives sizing + queue priority:
-        T1_MULTI_STRONG (>=2 strong families) : 1.5% risk, Rs 3.0L cap
-        T2_STRONG_REG   (1 strong + >=1 reg)   : 1.0% risk, Rs 2.5L cap
-        T3_MULTI_REG    (>=2 regular, no strong): 0.66% risk, Rs 1.5L cap
-  - Confirmation filters: top_rule_score >=85, rs_rank <=100,
-    close > ema_50, vol_ratio >=1.2, weekly_rsi_ema_9 >=45.
+Entry buckets (ranked priority A > B > C > D; signal_score breaks ties):
+    T1_MULTI_STRONG (A) — >=2 distinct strong entry_signal types from
+        {blue_zone_strong, golden_cross_strong, macd_strong,
+         bull_flag_strong, vcp_strong}.
+        Sizing: 1.5% risk, Rs 3.0L cap.
+    T2_STRONG_REG   (B) — >=2 distinct entry_signal families with EXACTLY
+        one strong family + >=1 regular family (family dedupe applied).
+        Sizing: 1.0% risk, Rs 2.5L cap.
+    T3_MULTI_REG    (C) — >=2 distinct entry_signal families, no strong.
+        Sizing: 0.66% risk, Rs 1.5L cap.
+    T4_RS_ACCEL     (D) — From presignal_scores: rule_rs_acceleration==100
+        AND any other rule (bz_buy/bz_strong/golden_cross/macd/
+        pullback_bounce) > 80 AND rank_slope <= -15 AND rs_30d_high=true.
+        Sizing: 0.5% risk, Rs 1.0L cap.
+
+Universal gates (all buckets):
+  - Sector must be in Leading or Improving quadrant (RRG via
+    get_all_sector_rankings RPC).
+  - Earnings filter: latest quarter YoY positive AND improving for BOTH
+    revenue and net profit (latest YoY > prior YoY). Requires >=6 quarters
+    in stock_fundamentals.quarterly_financials; reject otherwise.
+  - Not in real holdings, not in open paper, 21-trading-day cooldown
+    after a close.
+  - Position floor Rs 40k, sector concentration <=25%, <=8 open, <=3
+    new entries per day.
+  - Kill switches: pause new entries if daily P&L < -2% or DD > -8% ATH.
+
+Exit logic (unchanged):
   - Initial stop: 2 x ATR_14 below entry.
-  - Scale-out:
-        T1: 33% at +3R + breakeven, 33% at +6R + 2xATR trail, rest trails
-        T2/T3: 33% at +2R + breakeven, 33% at +4R + 2xATR trail, rest trails
+  - T1: 33% at +3R + breakeven, 33% at +6R + 2xATR trail, rest trails.
+  - T2/T3/T4: 33% at +2R + breakeven, 33% at +4R + 2xATR trail, rest trails.
   - Universal: book 25% if up >25% within 15 trading days.
   - Time stop: close if flat (-2%..+2%) after 25 trading days.
-  - Risk caps: 8 max open, 25% sector concentration, 3 new/day.
-  - Kill switches: pause new entries if daily P&L < -2% or DD > -8% from ATH.
 
 Schedule: weekdays at 22:00 IST (16:30 UTC).
 Inputs:   presignal_scores, entry_signals, daily_stock_snapshots, holdings,
-          indian_stock_sectors, paper_trades, paper_equity.
+          indian_stock_sectors, stock_fundamentals, paper_trades, paper_equity,
+          get_all_sector_rankings RPC.
 Outputs:  paper_trades (insert/update), paper_equity (upsert),
           paper_run_log (insert).
 """
@@ -59,15 +75,11 @@ SLEEVE = 2_500_000  # Rs 25L paper sleeve
 LOOKBACK_DAYS = 2
 COOLDOWN_DAYS = 21
 
-FILTER_MIN_SCORE = 85
-FILTER_MAX_RS_RANK = 100
-FILTER_MIN_VOL_RATIO = 1.2
-FILTER_MIN_WKLY_RSI = 45
-
 TIER_PARAMS = {
     'T1_MULTI_STRONG': {'risk_pct': 0.015,  'cap': 300_000, 'partial_R': [3, 6]},
     'T2_STRONG_REG':   {'risk_pct': 0.010,  'cap': 250_000, 'partial_R': [2, 4]},
     'T3_MULTI_REG':    {'risk_pct': 0.0066, 'cap': 150_000, 'partial_R': [2, 4]},
+    'T4_RS_ACCEL':     {'risk_pct': 0.005,  'cap': 100_000, 'partial_R': [2, 4]},
 }
 POSITION_FLOOR = 40_000
 SLIPPAGE_BPS = 15
@@ -88,30 +100,46 @@ MAX_NEW_PER_DAY = 3
 DAILY_KILL_PCT = -2.0
 DD_KILL_PCT = -8.0
 
-# signal_type -> (family, strength)
-FAMILY_MAP = {
-    # presignal_scores.top_signal
-    'bz_buy':               ('BLUE_ZONE',     'regular'),
-    'bz_strong':            ('BLUE_ZONE',     'strong'),
-    'rs_acceleration':      ('RS_ACCEL',      'regular'),
-    'golden_cross':         ('GOLDEN_CROSS',  'regular'),
-    'macd':                 ('MACD',          'regular'),
-    'pullback_bounce':      ('PULLBACK',      'regular'),
-    # entry_signals.signal_type
-    'blue_zone_buy':        ('BLUE_ZONE',     'regular'),
-    'blue_zone_strong':     ('BLUE_ZONE',     'strong'),
-    'golden_cross_buy':     ('GOLDEN_CROSS',  'regular'),
-    'golden_cross_strong':  ('GOLDEN_CROSS',  'strong'),
-    'macd_buy':             ('MACD',          'regular'),
-    'macd_strong':          ('MACD',          'strong'),
-    'narrow_cpr_breakaway': ('CPR_BREAKAWAY', 'strong'),
-    'vcp_buy':              ('VCP',           'regular'),
-    'bull_flag_buy':        ('BULL_FLAG',     'regular'),
-    'darvas_box':           ('DARVAS',        'strong'),
+# entry_signal types treated as STRONG for bucket A (matches dashboard
+# Multi-Strong Buy definition).
+STRONG_ENTRY_TYPES = {
+    'blue_zone_strong', 'golden_cross_strong', 'macd_strong',
+    'bull_flag_strong', 'vcp_strong',
 }
 
-# rs_acceleration with score >= this is treated as 'strong'
-RS_ACCEL_STRONG_SCORE = 95
+# entry_signals.signal_type -> family (used for B/C dedupe so a Strong+Buy
+# pair from the same family doesn't qualify as multi-signal).
+ENTRY_FAMILY_MAP = {
+    'blue_zone_buy':        'BLUE_ZONE',
+    'blue_zone_strong':     'BLUE_ZONE',
+    'golden_cross_buy':     'GOLDEN_CROSS',
+    'golden_cross_strong':  'GOLDEN_CROSS',
+    'macd_buy':             'MACD',
+    'macd_strong':          'MACD',
+    'bull_flag_buy':        'BULL_FLAG',
+    'bull_flag_strong':     'BULL_FLAG',
+    'vcp_buy':              'VCP',
+    'vcp_strong':           'VCP',
+    'narrow_cpr_breakaway': 'CPR_BREAKAWAY',
+    'darvas_box':           'DARVAS',
+}
+
+# Pre-signal Bucket D thresholds
+RS_ACCEL_REQUIRED_SCORE = 100
+RS_ACCEL_OTHER_RULE_MIN = 80
+RS_ACCEL_RANK_SLOPE_MAX = -15
+RS_ACCEL_OTHER_RULES = (
+    'rule_bz_buy', 'rule_bz_strong', 'rule_golden_cross',
+    'rule_macd', 'rule_pullback_bounce',
+)
+
+# Sector RRG quadrants that pass the universal sector gate
+ALLOWED_SECTOR_QUADRANTS = {'leading', 'improving'}
+
+# Earnings filter: min quarters in quarterly_financials to evaluate the
+# "YoY positive AND improving" test. Latest YoY = Q[0]/Q[4]; prior YoY =
+# Q[1]/Q[5]; so 6 quarters minimum.
+EARNINGS_MIN_QUARTERS = 6
 
 
 # ----------------------------------------------------------------------
@@ -264,89 +292,225 @@ def load_cumulative_closed_pnl(sb):
     return sum(to_float(r.get('total_pnl'), 0) for r in (resp.data or []))
 
 
+def load_sector_quadrants(sb):
+    """sector_name -> rrg_quadrant (lowercase). Empty dict on any failure.
+
+    The RPC `get_all_sector_rankings` returns a JSON object. supabase-py may
+    deliver it as a parsed dict, a JSON-encoded string, or (if the function
+    returns a list) a list directly. Handle all three.
+    """
+    try:
+        resp = sb.rpc('get_all_sector_rankings').execute()
+        data = resp.data
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                log('load_sector_quadrants: data is str but not JSON')
+                return {}
+        # RPC payload shape: {'as_of': date, 'total_sectors': N,
+        #   'sectors': { 'IT': {sector, rrg_quadrant, ...}, 'FMCG': {...}, ... } }
+        # Older callers may see a list — accept both.
+        if isinstance(data, dict):
+            sectors_obj = data.get('sectors')
+        elif isinstance(data, list):
+            sectors_obj = data
+        else:
+            sectors_obj = None
+
+        if isinstance(sectors_obj, dict):
+            iterable = sectors_obj.values()
+        elif isinstance(sectors_obj, list):
+            iterable = sectors_obj
+        else:
+            iterable = []
+
+        out = {}
+        for s in iterable:
+            if not isinstance(s, dict):
+                continue
+            name = s.get('sector')
+            q = s.get('rrg_quadrant')
+            if name and q:
+                out[name] = str(q).lower()
+        return out
+    except Exception as e:
+        log(f'load_sector_quadrants failed: {e}')
+        return {}
+
+
+def load_fundamentals(sb, tickers):
+    """ticker -> quarterly_financials list (newest first). Skips missing/short."""
+    out = {}
+    if not tickers:
+        return out
+    tickers = list(tickers)
+    BATCH = 100
+    for i in range(0, len(tickers), BATCH):
+        chunk = tickers[i:i + BATCH]
+        try:
+            resp = (sb.table('stock_fundamentals')
+                      .select('ticker, quarterly_financials')
+                      .in_('ticker', chunk).execute())
+        except Exception as e:
+            log(f'load_fundamentals batch failed: {e}')
+            continue
+        for r in (resp.data or []):
+            qf = r.get('quarterly_financials')
+            if isinstance(qf, str):
+                try:
+                    qf = json.loads(qf)
+                except json.JSONDecodeError:
+                    qf = None
+            if isinstance(qf, list):
+                out[r['ticker']] = qf
+    return out
+
+
 # ----------------------------------------------------------------------
-# SIGNAL DEDUPE + TIER
+# BUCKET CLASSIFICATION
 # ----------------------------------------------------------------------
 
 def group_signals_by_ticker(presignals, entry_signals):
-    by_ticker = defaultdict(
-        lambda: {'presignal_ids': [], 'entry_signal_ids': [], 'rows': []}
-    )
+    by_ticker = defaultdict(lambda: {
+        'presignal_ids': [], 'entry_signal_ids': [],
+        'presignal_rows': [], 'entry_signal_rows': [],
+    })
     for r in presignals:
-        if not r.get('top_signal'):
-            continue
         by_ticker[r['ticker']]['presignal_ids'].append(r['id'])
-        by_ticker[r['ticker']]['rows'].append(('presignal', r))
+        by_ticker[r['ticker']]['presignal_rows'].append(r)
     for r in entry_signals:
         by_ticker[r['ticker']]['entry_signal_ids'].append(r['id'])
-        by_ticker[r['ticker']]['rows'].append(('entry_signal', r))
+        by_ticker[r['ticker']]['entry_signal_rows'].append(r)
     return by_ticker
 
 
-def derive_families(rows):
+def classify_entry_bucket(entry_signal_rows):
+    """Classify ticker into T1/T2/T3 from entry_signals. Returns
+    (bucket, families_list, family_strength_dict, signal_score) or (None,...)."""
+    types_seen = set()
+    for r in entry_signal_rows:
+        t = r.get('signal_type')
+        if t in ENTRY_FAMILY_MAP:
+            types_seen.add(t)
+    if not types_seen:
+        return None, [], {}, 0.0
+
+    # Bucket A: >=2 distinct STRONG signal_types (signal-type-level, not family)
+    strong_types = types_seen & STRONG_ENTRY_TYPES
+    if len(strong_types) >= 2:
+        families = sorted({ENTRY_FAMILY_MAP[s] for s in types_seen})
+        fam_strength = {ENTRY_FAMILY_MAP[s]: 'strong' for s in strong_types}
+        for s in types_seen - strong_types:
+            fam_strength.setdefault(ENTRY_FAMILY_MAP[s], 'regular')
+        score = len(strong_types) * 100.0
+        return 'T1_MULTI_STRONG', families, fam_strength, score
+
+    # B / C: dedupe to families
     fam_strength = {}
-    for source, rec in rows:
-        if source == 'presignal':
-            sig = rec.get('top_signal')
-            score = to_float(rec.get('top_rule_score'), 0)
-        else:
-            sig = rec.get('signal_type')
-            score = 0
-        if not sig or sig not in FAMILY_MAP:
-            continue
-        fam, strength = FAMILY_MAP[sig]
-        if sig == 'rs_acceleration' and score >= RS_ACCEL_STRONG_SCORE:
-            strength = 'strong'
+    for t in types_seen:
+        fam = ENTRY_FAMILY_MAP[t]
+        is_strong = t in STRONG_ENTRY_TYPES
         prev = fam_strength.get(fam)
         if prev == 'strong':
             continue
-        fam_strength[fam] = 'strong' if strength == 'strong' else (prev or 'regular')
-    return fam_strength
+        fam_strength[fam] = 'strong' if is_strong else (prev or 'regular')
 
+    if len(fam_strength) < 2:
+        return None, [], {}, 0.0
 
-def classify_tier(fam_strength):
-    n_strong = sum(1 for s in fam_strength.values() if s == 'strong')
-    n_total = len(fam_strength)
-    if n_total < 2:
-        return None
-    if n_strong >= 2:
-        return 'T1_MULTI_STRONG'
+    n_strong = sum(1 for v in fam_strength.values() if v == 'strong')
+    families = sorted(fam_strength.keys())
+    # Score: families count + strong-family weighting (for intra-bucket ranking)
+    score = len(fam_strength) * 50.0 + n_strong * 30.0
     if n_strong == 1:
-        return 'T2_STRONG_REG'
-    return 'T3_MULTI_REG'
+        return 'T2_STRONG_REG', families, fam_strength, score
+    # n_strong == 0  (n_strong >= 2 already handled by Bucket A path above)
+    return 'T3_MULTI_REG', families, fam_strength, score
+
+
+def classify_presignal_bucket(presignal_rows):
+    """Bucket D (T4_RS_ACCEL): rule_rs_acceleration==100 + any other rule>80
+    + rank_slope<=-15 + rs_30d_high=true in the SAME row.
+    Returns (bucket, families, family_strength, signal_score, qualifying_row)
+    or (None, ..., ..., ..., None)."""
+    best_row = None
+    best_score = -1.0
+    for r in presignal_rows:
+        if to_float(r.get('rule_rs_acceleration'), 0) < RS_ACCEL_REQUIRED_SCORE:
+            continue
+        other_rules_passing = [
+            (k, to_float(r.get(k), 0)) for k in RS_ACCEL_OTHER_RULES
+            if to_float(r.get(k), 0) > RS_ACCEL_OTHER_RULE_MIN
+        ]
+        if not other_rules_passing:
+            continue
+        if to_float(r.get('rank_slope'), 0) > RS_ACCEL_RANK_SLOPE_MAX:
+            continue
+        if not r.get('rs_30d_high'):
+            continue
+        max_other = max(v for _, v in other_rules_passing)
+        # Score: weight the partner-rule strength
+        row_score = 100.0 + max_other
+        if row_score > best_score:
+            best_score = row_score
+            best_row = r
+    if best_row is None:
+        return None, [], {}, 0.0, None
+    return ('T4_RS_ACCEL', ['RS_ACCEL'], {'RS_ACCEL': 'strong'},
+            best_score, best_row)
 
 
 # ----------------------------------------------------------------------
-# FILTERS + SIZING
+# UNIVERSAL FILTERS
 # ----------------------------------------------------------------------
 
-def passes_filters(presignal_rows, signal_snapshot):
-    if presignal_rows:
-        ps = max(presignal_rows, key=lambda r: to_float(r.get('top_rule_score'), 0))
-        score = to_float(ps.get('top_rule_score'), 0)
-        if score < FILTER_MIN_SCORE:
-            return False, f'score_below_{FILTER_MIN_SCORE}'
-        rs_rank = to_int(ps.get('rs_rank'), 9999)
-        vol_ratio = to_float(ps.get('vol_ratio'), 0)
-        wkly_rsi = to_float(ps.get('weekly_rsi_ema_9'), 0)
-        close = to_float(ps.get('close'), 0)
-        ema_50 = to_float(ps.get('ema_50'), 0)
-    else:
-        snap = signal_snapshot or {}
-        rs_rank = to_int(snap.get('rs_rank'), 9999)
-        vol_ratio = to_float(snap.get('vol_ratio'), 0)
-        wkly_rsi = to_float(snap.get('weekly_rsi_ema_9'), 0)
-        close = to_float(snap.get('close'), 0)
-        ema_50 = to_float(snap.get('ema_50'), 0)
+def passes_sector_filter(ticker, sector_map, sector_quadrants):
+    sector = sector_map.get(ticker)
+    if not sector:
+        return False, 'sector_unknown'
+    q = sector_quadrants.get(sector)
+    if not q:
+        return False, 'sector_quadrant_missing'
+    if q not in ALLOWED_SECTOR_QUADRANTS:
+        return False, f'sector_{q}'
+    return True, None
 
-    if rs_rank > FILTER_MAX_RS_RANK:
-        return False, f'rs_rank_{rs_rank}'
-    if vol_ratio < FILTER_MIN_VOL_RATIO:
-        return False, 'vol_ratio_low'
-    if wkly_rsi < FILTER_MIN_WKLY_RSI:
-        return False, 'wkly_rsi_low'
-    if not close or not ema_50 or close <= ema_50:
-        return False, 'below_ema_50'
+
+def passes_earnings_filter(ticker, fundamentals_map):
+    """Latest YoY positive AND > prior YoY, for BOTH revenue and net profit.
+    quarterly_financials is newest-first (Q[0] = latest)."""
+    qf = fundamentals_map.get(ticker)
+    if not qf:
+        return False, 'fundamentals_missing'
+    if len(qf) < EARNINGS_MIN_QUARTERS:
+        return False, f'quarters_{len(qf)}'
+
+    def yoy(q_now, q_yr_ago, key):
+        a = to_float(q_now.get(key))
+        b = to_float(q_yr_ago.get(key))
+        if a is None or b is None or b <= 0:
+            return None
+        return (a - b) / b
+
+    latest_rev = yoy(qf[0], qf[4], 'revenue_cr')
+    prior_rev  = yoy(qf[1], qf[5], 'revenue_cr')
+    latest_np  = yoy(qf[0], qf[4], 'net_income_cr')
+    prior_np   = yoy(qf[1], qf[5], 'net_income_cr')
+
+    if latest_rev is None or prior_rev is None:
+        return False, 'revenue_data_incomplete'
+    if latest_np is None or prior_np is None:
+        return False, 'profit_data_incomplete'
+
+    if latest_rev <= 0:
+        return False, 'revenue_yoy_not_positive'
+    if latest_rev <= prior_rev:
+        return False, 'revenue_yoy_not_improving'
+    if latest_np <= 0:
+        return False, 'profit_yoy_not_positive'
+    if latest_np <= prior_np:
+        return False, 'profit_yoy_not_improving'
     return True, None
 
 
@@ -579,7 +743,10 @@ def process_exits(sb, open_trades, today_snap, today_date):
 def process_entries(sb, candidates, today_snap, today_date, holdings,
                     recent_closed, open_tickers, sector_map,
                     sector_exposure, max_new):
-    tier_order = {'T1_MULTI_STRONG': 0, 'T2_STRONG_REG': 1, 'T3_MULTI_REG': 2}
+    tier_order = {
+        'T1_MULTI_STRONG': 0, 'T2_STRONG_REG': 1,
+        'T3_MULTI_REG': 2,    'T4_RS_ACCEL': 3,
+    }
     candidates.sort(key=lambda c: (tier_order[c['tier']], -c['signal_score']))
 
     inserted = []
@@ -714,10 +881,12 @@ def main():
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
     funnel = {
         'signal_rows': 0, 'unique_tickers': 0,
-        'families_too_few': 0, 'failed_filter': 0,
+        'no_bucket': 0,
+        'sector_rejected': 0, 'earnings_rejected': 0,
         'in_holdings': 0, 'in_cooldown': 0, 'already_open': 0,
         'qualified': 0, 'inserted': 0,
-        'filter_reasons': {},
+        'bucket_counts': {},
+        'sector_reasons': {}, 'earnings_reasons': {},
     }
     errors = []
 
@@ -733,14 +902,14 @@ def main():
             f'signal_window={signal_date_from}..{signal_date_to}')
 
         today_snap = load_snapshots_for_date(sb, today_date.isoformat())
-        signal_snap_to = load_snapshots_for_date(sb, signal_date_to)
         holdings = load_holdings(sb)
         open_trades = load_open_paper_trades(sb)
         recent_closed = load_recent_closed_tickers(sb, today_date)
         sector_map = load_sectors(sb)
+        sector_quadrants = load_sector_quadrants(sb)
         equity_history = load_recent_equity(sb)
         log(f'open_trades={len(open_trades)} holdings={len(holdings)} '
-            f'cooldown={len(recent_closed)}')
+            f'cooldown={len(recent_closed)} sectors_quadranted={len(sector_quadrants)}')
 
         # 1. EXITS first using today's bar
         exit_actions, closed_today, realised_today = process_exits(
@@ -778,49 +947,73 @@ def main():
             log(f'signals: presignal={len(presignals)} entry={len(entry_signals_data)} '
                 f'tickers={len(by_ticker)}')
 
-            candidates = []
+            # Stage 1: classify each ticker into the highest bucket it qualifies
+            # for (T1 > T2 > T3 > T4), without yet applying universal gates.
+            raw_candidates = []
             for ticker, bundle in by_ticker.items():
-                fam_strength = derive_families(bundle['rows'])
-                if len(fam_strength) < 2:
-                    funnel['families_too_few'] += 1
-                    continue
-                tier = classify_tier(fam_strength)
-                if not tier:
-                    continue
-                presignal_rows_for_ticker = [
-                    r for src, r in bundle['rows'] if src == 'presignal'
-                ]
-                ok, reason = passes_filters(
-                    presignal_rows_for_ticker, signal_snap_to.get(ticker)
+                # Try entry-signal buckets first (higher priority than D)
+                bucket, families, fam_strength, score = classify_entry_bucket(
+                    bundle['entry_signal_rows']
                 )
-                if not ok:
-                    funnel['failed_filter'] += 1
-                    funnel['filter_reasons'][reason] = (
-                        funnel['filter_reasons'].get(reason, 0) + 1
+                presignal_row = None
+                if not bucket:
+                    bucket, families, fam_strength, score, presignal_row = (
+                        classify_presignal_bucket(bundle['presignal_rows'])
                     )
+                if not bucket:
+                    funnel['no_bucket'] += 1
                     continue
+                raw_candidates.append({
+                    'ticker': ticker,
+                    'tier': bucket,
+                    'families': families,
+                    'family_strength': fam_strength,
+                    'signal_score': score,
+                    'signal_ids': {
+                        'presignal_ids': (
+                            [presignal_row['id']] if presignal_row
+                            else bundle['presignal_ids']
+                        ),
+                        'entry_signal_ids': bundle['entry_signal_ids'],
+                    },
+                })
+
+            # Stage 2: load fundamentals only for bucket-qualifying tickers
+            fundamentals = load_fundamentals(
+                sb, [c['ticker'] for c in raw_candidates]
+            )
+
+            # Stage 3: apply hygiene + sector + earnings gates
+            candidates = []
+            for c in raw_candidates:
+                ticker = c['ticker']
                 if ticker in holdings:
                     funnel['in_holdings'] += 1; continue
                 if ticker in recent_closed:
                     funnel['in_cooldown'] += 1; continue
                 if ticker in open_tickers:
                     funnel['already_open'] += 1; continue
-                score = max(
-                    [to_float(r.get('top_rule_score'), 0)
-                     for r in presignal_rows_for_ticker],
-                    default=50.0,
+                sec_ok, sec_reason = passes_sector_filter(
+                    ticker, sector_map, sector_quadrants
                 )
-                candidates.append({
-                    'ticker': ticker,
-                    'tier': tier,
-                    'families': sorted(fam_strength.keys()),
-                    'family_strength': fam_strength,
-                    'signal_ids': {
-                        'presignal_ids': bundle['presignal_ids'],
-                        'entry_signal_ids': bundle['entry_signal_ids'],
-                    },
-                    'signal_score': score,
-                })
+                if not sec_ok:
+                    funnel['sector_rejected'] += 1
+                    funnel['sector_reasons'][sec_reason] = (
+                        funnel['sector_reasons'].get(sec_reason, 0) + 1
+                    )
+                    continue
+                e_ok, e_reason = passes_earnings_filter(ticker, fundamentals)
+                if not e_ok:
+                    funnel['earnings_rejected'] += 1
+                    funnel['earnings_reasons'][e_reason] = (
+                        funnel['earnings_reasons'].get(e_reason, 0) + 1
+                    )
+                    continue
+                funnel['bucket_counts'][c['tier']] = (
+                    funnel['bucket_counts'].get(c['tier'], 0) + 1
+                )
+                candidates.append(c)
+
             funnel['qualified'] = len(candidates)
             inserted = process_entries(
                 sb, candidates, today_snap, today_date, holdings, recent_closed,
