@@ -86,7 +86,6 @@ SUPABASE_KEY = os.getenv(
 
 SLEEVE = 2_500_000  # Rs 25L paper sleeve
 
-LOOKBACK_DAYS = 2
 COOLDOWN_DAYS = 21
 
 TIER_PARAMS = {
@@ -915,14 +914,16 @@ def main():
 
     try:
         recent_dates = get_recent_trading_dates(sb, days_back=5)
-        if len(recent_dates) < 2:
-            log('Insufficient trading data; aborting.')
+        if not recent_dates:
+            log('No trading data; aborting.')
             return
         today_date = date.fromisoformat(recent_dates[0])
-        signal_date_from = recent_dates[min(LOOKBACK_DAYS, len(recent_dates) - 1)]
-        signal_date_to = recent_dates[1]
-        log(f'today={today_date}  '
-            f'signal_window={signal_date_from}..{signal_date_to}')
+        # D0-only window: today's signals only. With the D0-scan/D1-fill split,
+        # there's no look-ahead bias from acting on D0 signals — the entry
+        # price is the next session's open, not today's.
+        signal_date_from = today_date.isoformat()
+        signal_date_to = today_date.isoformat()
+        log(f'today={today_date}  signal_window={signal_date_from}..{signal_date_to}')
 
         today_snap = load_snapshots_for_date(sb, today_date.isoformat())
         holdings = load_holdings(sb)
