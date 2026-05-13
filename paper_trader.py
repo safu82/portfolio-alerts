@@ -168,15 +168,47 @@ def trading_days_between(start: date, end: date) -> int:
 # DATA LOADERS
 # ----------------------------------------------------------------------
 
+_BENCHMARK_TICKERS_FOR_DATES = ('RELIANCE.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'INFY.NS')
+
+
 def get_recent_trading_dates(sb, days_back=10):
-    # Pull a chunk of recent snapshot dates (deduped).
-    resp = (sb.table('daily_stock_snapshots')
-              .select('snapshot_date')
-              .order('snapshot_date', desc=True)
-              .limit(days_back * 700)
-              .execute())
-    dates = sorted({r['snapshot_date'] for r in (resp.data or [])}, reverse=True)
-    return dates[:days_back]
+    # Querying the whole daily_stock_snapshots table hits PostgREST's 1000-row
+    # response cap (~1.7 days with 585 tickers), which silently truncates the
+    # signal lookback window. Use a single liquid benchmark instead — one row
+    # per trading day, no cap concerns.
+    for bench in _BENCHMARK_TICKERS_FOR_DATES:
+        resp = (sb.table('daily_stock_snapshots')
+                  .select('snapshot_date')
+                  .eq('ticker', bench)
+                  .order('snapshot_date', desc=True)
+                  .limit(days_back)
+                  .execute())
+        rows = resp.data or []
+        if len(rows) >= days_back:
+            return [r['snapshot_date'] for r in rows]
+    # Fallback: paginate through the full table if no benchmark has enough rows.
+    dates_seen = []
+    seen_set = set()
+    offset = 0
+    while len(seen_set) < days_back:
+        resp = (sb.table('daily_stock_snapshots')
+                  .select('snapshot_date')
+                  .order('snapshot_date', desc=True)
+                  .range(offset, offset + 999)
+                  .execute())
+        if not resp.data:
+            break
+        for r in resp.data:
+            d = r['snapshot_date']
+            if d not in seen_set:
+                seen_set.add(d)
+                dates_seen.append(d)
+                if len(seen_set) >= days_back:
+                    break
+        if len(resp.data) < 1000:
+            break
+        offset += 1000
+    return dates_seen[:days_back]
 
 
 def load_snapshots_for_date(sb, dt):
