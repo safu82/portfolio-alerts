@@ -571,11 +571,8 @@ def process_entries(sb, candidates, today_snap, today_date, holdings,
             continue
 
         sector = sector_map.get(ticker, 'Unknown')
-        deployed_after = sum(sector_exposure.values()) + notional
-        new_sector_value = sector_exposure.get(sector, 0) + notional
-        if (deployed_after > 0
-                and sector != 'Unknown'
-                and new_sector_value / deployed_after > MAX_SECTOR_CONC):
+        sector_notional_after = sector_exposure.get(sector, 0) + notional
+        if sector != 'Unknown' and sector_notional_after > MAX_SECTOR_CONC * SLEEVE:
             continue
 
         initial_stop = entry_price - STOP_ATR_MULT * atr14
