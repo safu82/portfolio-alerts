@@ -18,10 +18,26 @@ import time
 import pytz
 import requests
 
+# Paper-trading constants + helpers — reused for pending-fill and stop logic.
+# paper_trader.py is co-deployed with this worker on Railway.
+from paper_trader import (
+    SLEEVE as PAPER_SLEEVE,
+    SLIPPAGE_BPS as PAPER_SLIPPAGE_BPS,
+    STOP_ATR_MULT as PAPER_STOP_ATR_MULT,
+    TIER_PARAMS as PAPER_TIER_PARAMS,
+    POSITION_FLOOR as PAPER_POSITION_FLOOR,
+    size_position as paper_size_position,
+    trading_days_between as paper_trading_days_between,
+    to_float as paper_to_float,
+    to_int as paper_to_int,
+)
+
 # Configuration from environment variables
 ZERODHA_API_KEY = os.environ.get('ZERODHA_API_KEY')
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
+
+PENDING_MAX_TRADING_DAYS = 2
 
 # Initialize
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -311,21 +327,96 @@ def fetch_and_store_market_cap():
         print(f"⚠️  Market cap fetch error: {e}")
 
 
-# ─── Intraday paper stop monitor ──────────────────────────────────────────
-# After each live_prices write, check open paper trades: if LTP <= current_stop,
-# close the remaining qty at LTP. Mirrors paper_trader._close_trade so the EOD
-# 22:00 IST run sees status='closed' and skips it.
+# ─── Paper-trade fill + intraday stop monitor ────────────────────────────
+# On each price-tick cycle: (1) fill any pending paper trades using the
+# latest live_prices tick as D1 open; (2) check open paper trades against
+# LTP and close at the stop if breached. Mirrors paper_trader._close_trade
+# and paper_fill_pending.py so the EOD 22:00 IST run sees coherent state.
 
-def _trading_days_between(start, end):
-    if end <= start:
+
+def fill_pending_paper_trades():
+    """Walk pending paper trades; fill at LTP if live price available.
+    Expires rows older than PENDING_MAX_TRADING_DAYS as fill_expired.
+    Idempotent — already-filled rows have status='open' and are skipped.
+    """
+    try:
+        resp = (supabase.table('paper_trades').select('*')
+                  .eq('status', 'pending').eq('mode', 'paper').execute())
+        pending = resp.data or []
+        if not pending:
+            return 0
+
+        tickers = [r['ticker'] for r in pending]
+        prices_resp = (supabase.table('live_prices').select('ticker, price')
+                         .in_('ticker', tickers).execute())
+        price_map = {r['ticker']: paper_to_float(r.get('price'))
+                     for r in (prices_resp.data or [])}
+
+        today = datetime.now(ist).date()
+        filled = 0
+        for tr in pending:
+            ticker = tr['ticker']
+            try:
+                scan_date = date.fromisoformat(tr['entry_date'])
+                age_td = paper_trading_days_between(scan_date, today)
+
+                live_price = price_map.get(ticker)
+                if not live_price or live_price <= 0:
+                    if age_td > PENDING_MAX_TRADING_DAYS:
+                        _expire_pending(tr, today, 'fill_expired')
+                        print(f"  ⏳ PAPER EXPIRED: {ticker} (age={age_td}td, no live price)")
+                    continue
+
+                tier = tr['strategy_tier']
+                entry_atr = paper_to_float(tr.get('entry_atr'))
+                if not entry_atr or entry_atr <= 0:
+                    _expire_pending(tr, today, 'fill_rejected_missing_atr')
+                    continue
+
+                entry_price = live_price * (1 + PAPER_SLIPPAGE_BPS / 10_000)
+                qty, _, _ = paper_size_position(tier, entry_price, entry_atr)
+                if qty == 0:
+                    _expire_pending(tr, today, 'fill_rejected_position_floor')
+                    print(f"  ❌ PAPER FILL REJECT: {ticker} qty=0 @ {entry_price:.2f}")
+                    continue
+
+                initial_stop = entry_price - PAPER_STOP_ATR_MULT * entry_atr
+                initial_risk = qty * (entry_price - initial_stop)
+
+                supabase.table('paper_trades').update({
+                    'entry_date': today.isoformat(),
+                    'entry_price': round(entry_price, 4),
+                    'initial_quantity': qty,
+                    'current_quantity': qty,
+                    'entry_value': round(qty * entry_price, 2),
+                    'initial_risk': round(initial_risk, 2),
+                    'initial_stop': round(initial_stop, 4),
+                    'current_stop': round(initial_stop, 4),
+                    'status': 'open',
+                    'updated_at': datetime.utcnow().isoformat(),
+                }).eq('id', tr['id']).execute()
+                filled += 1
+                print(f"  ✅ PAPER FILL: {ticker} @ {entry_price:.2f} "
+                      f"qty={qty} stop={initial_stop:.2f} ({tier})")
+            except Exception as e:
+                print(f"  ⚠️  Fill failed for {ticker}: {e}")
+        return filled
+    except Exception as e:
+        print(f"⚠️  fill_pending_paper_trades error: {e}")
         return 0
-    n = 0
-    d = start
-    while d < end:
-        d = date.fromordinal(d.toordinal() + 1)
-        if d.weekday() < 5:
-            n += 1
-    return n
+
+
+def _expire_pending(tr, today, reason):
+    supabase.table('paper_trades').update({
+        'status': 'closed',
+        'exit_date': today.isoformat(),
+        'exit_reason': reason,
+        'exit_price': None,
+        'total_pnl': 0,
+        'total_pnl_pct': 0,
+        'current_quantity': 0,
+        'updated_at': datetime.utcnow().isoformat(),
+    }).eq('id', tr['id']).execute()
 
 
 def _close_paper_at_ltp(tr, ltp):
@@ -355,7 +446,7 @@ def _close_paper_at_ltp(tr, ltp):
     today_ist = datetime.now(ist).date()
     try:
         entry_date = date.fromisoformat(tr['entry_date'])
-        holding_days = _trading_days_between(entry_date, today_ist)
+        holding_days = paper_trading_days_between(entry_date, today_ist)
     except Exception:
         holding_days = 0
 
@@ -510,15 +601,23 @@ def main():
             if kite and token_to_ticker:
                 updated = fetch_and_update_prices(kite, token_to_ticker)
                 fetch_and_update_index_prices(kite)  # NIFTY 50, NIFTY 500, USDINR
+                # Fill must run before stops on a fresh fill: pending → open
+                # with the actual D1 entry price + ATR-derived stop.
+                filled = fill_pending_paper_trades() if updated > 0 else 0
                 stopped = check_paper_stops()
                 update_count += 1
 
                 now = datetime.now(ist)
-                stop_suffix = f", stopped_paper={stopped}" if stopped else ""
+                suffix_parts = []
+                if filled:
+                    suffix_parts.append(f"filled_paper={filled}")
+                if stopped:
+                    suffix_parts.append(f"stopped_paper={stopped}")
+                suffix = (", " + ", ".join(suffix_parts)) if suffix_parts else ""
                 if updated > 0:
-                    print(f"📈 {now.strftime('%H:%M:%S')} - Updated {updated}/{len(token_to_ticker)} prices (#{update_count}){stop_suffix}")
+                    print(f"📈 {now.strftime('%H:%M:%S')} - Updated {updated}/{len(token_to_ticker)} prices (#{update_count}){suffix}")
                 else:
-                    print(f"⚠️  {now.strftime('%H:%M:%S')} - No updates (#{update_count}){stop_suffix}")
+                    print(f"⚠️  {now.strftime('%H:%M:%S')} - No updates (#{update_count}){suffix}")
 
                 # Check for new stocks every 5 minutes (incl. fresh paper trades)
                 if time.time() - last_ticker_check > 300:
