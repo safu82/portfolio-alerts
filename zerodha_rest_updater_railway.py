@@ -12,7 +12,7 @@ UPDATED April 2026:
 
 from kiteconnect import KiteConnect
 from supabase import create_client
-from datetime import datetime
+from datetime import date, datetime
 import os
 import time
 import pytz
@@ -73,6 +73,26 @@ def get_portfolio_tickers():
         print(f"⚠️  Error getting portfolio tickers: {e}")
 
     return tickers
+
+
+def get_paper_active_tickers():
+    """Active paper trades — pending (waiting for D1 open fill) + open."""
+    tickers = set()
+    try:
+        resp = (supabase.table('paper_trades').select('ticker, status, mode')
+                  .in_('status', ['pending', 'open']).eq('mode', 'paper').execute())
+        for r in (resp.data or []):
+            t = r.get('ticker')
+            if t and (t.endswith('.NS') or t.endswith('.BO')):
+                tickers.add(t)
+    except Exception as e:
+        print(f"⚠️  Error getting active paper tickers: {e}")
+    return tickers
+
+
+def get_all_streaming_tickers():
+    """Union of real portfolio tickers + active paper-trade tickers."""
+    return get_portfolio_tickers() | get_paper_active_tickers()
 
 def get_instrument_mappings(kite, tickers):
     """Map Yahoo tickers to Zerodha instrument tokens"""
@@ -290,6 +310,111 @@ def fetch_and_store_market_cap():
     except Exception as e:
         print(f"⚠️  Market cap fetch error: {e}")
 
+
+# ─── Intraday paper stop monitor ──────────────────────────────────────────
+# After each live_prices write, check open paper trades: if LTP <= current_stop,
+# close the remaining qty at LTP. Mirrors paper_trader._close_trade so the EOD
+# 22:00 IST run sees status='closed' and skips it.
+
+def _trading_days_between(start, end):
+    if end <= start:
+        return 0
+    n = 0
+    d = start
+    while d < end:
+        d = date.fromordinal(d.toordinal() + 1)
+        if d.weekday() < 5:
+            n += 1
+    return n
+
+
+def _close_paper_at_ltp(tr, ltp):
+    entry_price = float(tr['entry_price'])
+    initial_qty = int(tr['initial_quantity'])
+    initial_stop = float(tr['initial_stop'])
+    current_qty = int(tr['current_quantity'])
+    if current_qty <= 0:
+        return
+    realised_pnl_before = float(tr.get('realised_pnl') or 0)
+    realised_qty_before = int(tr.get('realised_qty') or 0)
+    trail_armed = bool(tr.get('trail_armed'))
+    breakeven_armed = bool(tr.get('breakeven_armed'))
+    partials_taken = int(tr.get('partials_taken') or 0)
+    partials = tr.get('partials') or []
+
+    exit_chunk_pnl = (ltp - entry_price) * current_qty
+    realised_pnl = realised_pnl_before + exit_chunk_pnl
+    realised_qty = realised_qty_before + current_qty
+
+    entry_value = entry_price * initial_qty
+    total_pnl_pct = (realised_pnl / entry_value * 100) if entry_value else 0
+    risk_per_share = entry_price - initial_stop
+    r_mult = ((realised_pnl / initial_qty) / risk_per_share
+              if (initial_qty and risk_per_share > 0) else None)
+
+    today_ist = datetime.now(ist).date()
+    try:
+        entry_date = date.fromisoformat(tr['entry_date'])
+        holding_days = _trading_days_between(entry_date, today_ist)
+    except Exception:
+        holding_days = 0
+
+    supabase.table('paper_trades').update({
+        'exit_date': today_ist.isoformat(),
+        'exit_price': round(ltp, 4),
+        'exit_reason': 'trail_stop' if trail_armed else 'stop',
+        'total_pnl': round(realised_pnl, 2),
+        'total_pnl_pct': round(total_pnl_pct, 3),
+        'r_multiple': round(r_mult, 3) if r_mult is not None else None,
+        'holding_days': holding_days,
+        'current_quantity': 0,
+        'realised_pnl': round(realised_pnl, 2),
+        'realised_qty': realised_qty,
+        'partials': partials,
+        'partials_taken': partials_taken,
+        'breakeven_armed': breakeven_armed,
+        'trail_armed': trail_armed,
+        'status': 'closed',
+        'updated_at': datetime.utcnow().isoformat(),
+    }).eq('id', tr['id']).execute()
+
+
+def check_paper_stops():
+    """Walk open paper trades, exit at LTP if LTP <= current_stop."""
+    try:
+        trades_resp = (supabase.table('paper_trades').select('*')
+                         .eq('status', 'open').eq('mode', 'paper').execute())
+        open_trades = trades_resp.data or []
+        if not open_trades:
+            return 0
+
+        tickers = [t['ticker'] for t in open_trades]
+        prices_resp = (supabase.table('live_prices').select('ticker, price')
+                         .in_('ticker', tickers).execute())
+        price_map = {r['ticker']: float(r.get('price') or 0)
+                     for r in (prices_resp.data or [])}
+
+        closed = 0
+        for tr in open_trades:
+            ltp = price_map.get(tr['ticker'], 0)
+            current_stop = float(tr.get('current_stop') or 0)
+            if ltp <= 0 or current_stop <= 0:
+                continue
+            if ltp > current_stop:
+                continue
+            try:
+                _close_paper_at_ltp(tr, ltp)
+                closed += 1
+                print(f"  🛑 PAPER STOP: {tr['ticker']} @ {ltp:.2f} "
+                      f"(stop={current_stop:.2f}, tier={tr.get('strategy_tier')})")
+            except Exception as e:
+                print(f"  ⚠️  Failed to close paper trade {tr['ticker']}: {e}")
+        return closed
+    except Exception as e:
+        print(f"⚠️  check_paper_stops error: {e}")
+        return 0
+
+
 def main():
     print("=" * 60)
     print("ZERODHA LIVE PRICE UPDATER - RAILWAY CLOUD VERSION")
@@ -352,9 +477,10 @@ def main():
                 kite.set_access_token(access_token)
                 print("✅ Connected to Zerodha API with fresh token\n")
 
-                print("📊 Getting your portfolio stocks...")
-                tickers = get_portfolio_tickers()
-                print(f"✅ Found {len(tickers)} stocks\n")
+                print("📊 Getting your portfolio + active paper-trade stocks...")
+                tickers = get_all_streaming_tickers()
+                print(f"✅ Found {len(tickers)} stocks "
+                      f"(incl. active paper trades)\n")
 
                 if not tickers:
                     print("⚠️  No stocks in portfolio! Waiting...")
@@ -384,25 +510,36 @@ def main():
             if kite and token_to_ticker:
                 updated = fetch_and_update_prices(kite, token_to_ticker)
                 fetch_and_update_index_prices(kite)  # NIFTY 50, NIFTY 500, USDINR
+                stopped = check_paper_stops()
                 update_count += 1
 
                 now = datetime.now(ist)
+                stop_suffix = f", stopped_paper={stopped}" if stopped else ""
                 if updated > 0:
-                    print(f"📈 {now.strftime('%H:%M:%S')} - Updated {updated}/{len(token_to_ticker)} prices (#{update_count})")
+                    print(f"📈 {now.strftime('%H:%M:%S')} - Updated {updated}/{len(token_to_ticker)} prices (#{update_count}){stop_suffix}")
                 else:
-                    print(f"⚠️  {now.strftime('%H:%M:%S')} - No updates (#{update_count})")
+                    print(f"⚠️  {now.strftime('%H:%M:%S')} - No updates (#{update_count}){stop_suffix}")
 
-                # Check for new stocks every 5 minutes
+                # Check for new stocks every 5 minutes (incl. fresh paper trades)
                 if time.time() - last_ticker_check > 300:
                     print("\n🔄 Checking for new stocks...")
-                    new_tickers = get_portfolio_tickers()
-                    if len(new_tickers) > len(tickers):
-                        print(f"📢 Found {len(new_tickers) - len(tickers)} new stocks!")
+                    new_tickers = get_all_streaming_tickers()
+                    if new_tickers != tickers:
+                        added = new_tickers - tickers
+                        dropped = tickers - new_tickers
+                        if added:
+                            print(f"📢 Added {len(added)} ticker(s): "
+                                  f"{', '.join(sorted(added)[:5])}"
+                                  f"{'...' if len(added) > 5 else ''}")
+                        if dropped:
+                            print(f"➖ Dropped {len(dropped)} ticker(s): "
+                                  f"{', '.join(sorted(dropped)[:5])}"
+                                  f"{'...' if len(dropped) > 5 else ''}")
                         tickers = new_tickers
                         token_to_ticker = get_instrument_mappings(kite, tickers)
                         print()
                     else:
-                        print("✅ No new stocks\n")
+                        print("✅ No changes\n")
                     last_ticker_check = time.time()
 
             time.sleep(5)

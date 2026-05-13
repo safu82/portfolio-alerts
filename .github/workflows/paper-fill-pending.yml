@@ -1,0 +1,31 @@
+name: Paper Trade Fill (D1 open)
+
+on:
+  schedule:
+    - cron: '50 3 * * 1-5'  # 09:20 IST (03:50 UTC), Mon-Fri
+  workflow_dispatch:
+
+jobs:
+  paper-fill:
+    name: Fill Pending Paper Trades at D1 Open
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install supabase
+
+      - name: Run Fill Job
+        run: python paper_fill_pending.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}

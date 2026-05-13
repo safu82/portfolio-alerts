@@ -33,12 +33,26 @@ Universal gates (all buckets):
     new entries per day.
   - Kill switches: pause new entries if daily P&L < -2% or DD > -8% ATH.
 
-Exit logic (unchanged):
+Execution flow (added 2026-05-13 to remove look-ahead bias):
+  D0 22:00 IST — this script writes approved candidates as PENDING rows
+    (status='pending') with the D0 ATR captured. Placeholder entry_price /
+    qty / stop are derived from D0 close so sector concentration and floor
+    checks are valid; they will be overwritten at fill time.
+  D1 09:20 IST — `paper_fill_pending.py` (separate workflow) reads pending
+    rows, looks up the first live_prices tick of the session, recomputes
+    entry_price / qty / initial_stop using D1 open (price * 1.0015 for
+    slippage), and flips status='open' with entry_date=D1.
+  Pending rows older than 2 trading days are auto-closed by the fill job
+    with exit_reason='fill_expired'.
+
+Exit logic:
   - Initial stop: 2 x ATR_14 below entry.
   - T1: 33% at +3R + breakeven, 33% at +6R + 2xATR trail, rest trails.
   - T2/T3/T4: 33% at +2R + breakeven, 33% at +4R + 2xATR trail, rest trails.
   - Universal: book 25% if up >25% within 15 trading days.
   - Time stop: close if flat (-2%..+2%) after 25 trading days.
+  - Intraday stop: zerodha_rest_updater_railway.py exits at LTP if LTP
+    <= current_stop. Partials/trailing/time-stop remain EOD here.
 
 Schedule: weekdays at 22:00 IST (16:30 UTC).
 Inputs:   presignal_scores, entry_signals, daily_stock_snapshots, holdings,
@@ -266,6 +280,12 @@ def load_holdings(sb):
 def load_open_paper_trades(sb):
     resp = (sb.table('paper_trades').select('*')
               .eq('status', 'open').eq('mode', 'paper').execute())
+    return resp.data or []
+
+
+def load_pending_paper_trades(sb):
+    resp = (sb.table('paper_trades').select('*')
+              .eq('status', 'pending').eq('mode', 'paper').execute())
     return resp.data or []
 
 
@@ -759,13 +779,16 @@ def process_entries(sb, candidates, today_snap, today_date, holdings,
         snap = today_snap.get(ticker)
         if not snap:
             continue
-        open_today = to_float(snap.get('open'))
+        close_today = to_float(snap.get('close'))
         atr14 = to_float(snap.get('atr_14'))
-        if not open_today or not atr14 or atr14 <= 0:
+        if not close_today or not atr14 or atr14 <= 0:
             continue
 
-        entry_price = open_today * (1 + SLIPPAGE_BPS / 10_000)
-        qty, notional, _ = size_position(c['tier'], entry_price, atr14)
+        # Pending row: estimate entry/qty/stop from D0 close so sector
+        # concentration + floor checks are sane. Fill job (paper_fill_pending.py)
+        # overwrites these with real values using D1 open the next morning.
+        est_entry_price = close_today * (1 + SLIPPAGE_BPS / 10_000)
+        qty, notional, _ = size_position(c['tier'], est_entry_price, atr14)
         if qty == 0:
             continue
 
@@ -774,8 +797,8 @@ def process_entries(sb, candidates, today_snap, today_date, holdings,
         if sector != 'Unknown' and sector_notional_after > MAX_SECTOR_CONC * SLEEVE:
             continue
 
-        initial_stop = entry_price - STOP_ATR_MULT * atr14
-        initial_risk = qty * (entry_price - initial_stop)
+        est_initial_stop = est_entry_price - STOP_ATR_MULT * atr14
+        est_initial_risk = qty * (est_entry_price - est_initial_stop)
 
         row = {
             'ticker': ticker,
@@ -787,16 +810,16 @@ def process_entries(sb, candidates, today_snap, today_date, holdings,
             ),
             'signal_ids': c['signal_ids'],
             'signal_score': round(c['signal_score'], 2),
-            'entry_date': today_date.isoformat(),
-            'entry_price': round(entry_price, 4),
+            'entry_date': today_date.isoformat(),  # scan date; fill job updates to D1
+            'entry_price': round(est_entry_price, 4),  # placeholder, fill recomputes
             'entry_atr': round(atr14, 4),
-            'initial_quantity': qty,
+            'initial_quantity': qty,  # placeholder, fill recomputes
             'current_quantity': qty,
-            'entry_value': round(qty * entry_price, 2),
-            'initial_risk': round(initial_risk, 2),
-            'initial_stop': round(initial_stop, 4),
-            'current_stop': round(initial_stop, 4),
-            'status': 'open',
+            'entry_value': round(qty * est_entry_price, 2),
+            'initial_risk': round(est_initial_risk, 2),
+            'initial_stop': round(est_initial_stop, 4),
+            'current_stop': round(est_initial_stop, 4),
+            'status': 'pending',
             'mode': 'paper',
         }
         sb.table('paper_trades').insert(row).execute()
@@ -904,24 +927,30 @@ def main():
         today_snap = load_snapshots_for_date(sb, today_date.isoformat())
         holdings = load_holdings(sb)
         open_trades = load_open_paper_trades(sb)
+        pending_trades = load_pending_paper_trades(sb)
         recent_closed = load_recent_closed_tickers(sb, today_date)
         sector_map = load_sectors(sb)
         sector_quadrants = load_sector_quadrants(sb)
         equity_history = load_recent_equity(sb)
-        log(f'open_trades={len(open_trades)} holdings={len(holdings)} '
-            f'cooldown={len(recent_closed)} sectors_quadranted={len(sector_quadrants)}')
+        log(f'open_trades={len(open_trades)} pending={len(pending_trades)} '
+            f'holdings={len(holdings)} cooldown={len(recent_closed)} '
+            f'sectors_quadranted={len(sector_quadrants)}')
 
-        # 1. EXITS first using today's bar
+        # 1. EXITS first using today's bar (operates on 'open' only)
         exit_actions, closed_today, realised_today = process_exits(
             sb, open_trades, today_snap, today_date
         )
         log(f'exits processed: {len(exit_actions)} (closed={closed_today})')
         open_trades = load_open_paper_trades(sb)
-        open_tickers = {t['ticker'] for t in open_trades}
+        pending_trades = load_pending_paper_trades(sb)
+        # Pending rows occupy slots + sector exposure so we don't over-commit
+        # between the D0 scan and the D1 fill.
+        committed_trades = open_trades + pending_trades
+        open_tickers = {t['ticker'] for t in committed_trades}
 
-        # 2. Sector exposure (post-exit baseline)
+        # 2. Sector exposure (post-exit baseline, includes pending)
         sector_exposure = defaultdict(float)
-        for tr in open_trades:
+        for tr in committed_trades:
             sector_exposure[tr.get('sector') or 'Unknown'] += to_float(tr['entry_value'], 0)
 
         # 3. Provisional MTM + kill switch check
@@ -935,10 +964,11 @@ def main():
         inserted = []
         if kill:
             log(f'KILL SWITCH: {kill_reason} -- skipping new entries')
-        elif len(open_trades) >= MAX_OPEN_POSITIONS:
-            log(f'At max open positions ({MAX_OPEN_POSITIONS}) -- skipping new entries')
+        elif len(committed_trades) >= MAX_OPEN_POSITIONS:
+            log(f'At max open positions ({MAX_OPEN_POSITIONS}, incl. pending) '
+                f'-- skipping new entries')
         else:
-            slots = min(MAX_NEW_PER_DAY, MAX_OPEN_POSITIONS - len(open_trades))
+            slots = min(MAX_NEW_PER_DAY, MAX_OPEN_POSITIONS - len(committed_trades))
             presignals = load_presignals(sb, signal_date_from, signal_date_to)
             entry_signals_data = load_entry_signals(sb, signal_date_from, signal_date_to)
             funnel['signal_rows'] = len(presignals) + len(entry_signals_data)
