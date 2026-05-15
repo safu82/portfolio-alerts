@@ -1,0 +1,606 @@
+ticker,company_name,our_sector,expected_sector,verdict,screener_broad_sector,screener_sector,screener_broad_industry,screener_industry,status
+AVANTIFEED.NS,AVANTI FEEDS LIMITED,AGRICULTURE,FMCG,mismatch,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Food Products,Animal Feed,ok
+GAEL.NS,GUJARAT AGRO INDUSTRIES LIMITED,AGRICULTURE,FMCG,mismatch,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,Other Agricultural Products,ok
+GODFRYPHLP.NS,GODFREY PHILLIPS INDIA LIMITED,AGRICULTURE,FMCG,mismatch,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Cigarettes & Tobacco Products,Cigarettes & Tobacco Products,ok
+GODREJAGRO.NS,GODREJ AGROVET LIMITED,AGRICULTURE,FMCG,mismatch,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Food Products,Animal Feed,ok
+KSCL.NS,KAVERI SEED COMPANY LIMITED,AGRICULTURE,FMCG,mismatch,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,Other Agricultural Products,ok
+RENUKA.NS,SHREE RENUKA SUGARS LIMITED,AGRICULTURE,FMCG,mismatch,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,Sugar,ok
+APARINDS.NS,APOLLO PIPES LIMITED,AUTO COMPONENTS,INDUSTRIAL,mismatch,Industrials,Capital Goods,Electrical Equipment,Other Electrical Equipment,ok
+HBLENGINE.NS,HBL ENGINEERING LIMITED,AUTO COMPONENTS,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Products,Other Industrial Products,ok
+ARE&M.NS,AMARA RAJA ENERGY & MOBILITY LIMITED,AUTOMOBILE,AUTO COMPONENTS,mismatch,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+ASHOKLEY.NS,ASHOK LEYLAND LTD,AUTOMOBILE,INDUSTRIAL,mismatch,Industrials,Capital Goods,"Agricultural, Commercial & Construction Vehicles",Commercial Vehicles,ok
+ESCORTS.NS,ESCORTS LIMITED,AUTOMOBILE,INDUSTRIAL,mismatch,Industrials,Capital Goods,"Agricultural, Commercial & Construction Vehicles",Tractors,ok
+GREAVESCOT.NS,GREAVES COTTON LIMITED,AUTOMOBILE,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Products,"Compressors, Pumps & Diesel Engines",ok
+INDIGO.NS,INTERGLOBE AVIATION LIMITED,AVIATION,CONSUMER SERVICES,mismatch,Services,Services,Transport Services,Airline,ok
+JWL.NS,JET AIRWAYS (INDIA) LIMITED,AVIATION,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Manufacturing,Railway Wagons,ok
+SPICEJET.NS,SPICEJET LIMITED,AVIATION,CONSUMER SERVICES,mismatch,Services,Services,Transport Services,Airline,ok
+ASIANPAINT.NS,ASIAN PAINTS LIMITED,CHEMICALS,CONSUMER DURABLES,mismatch,Consumer Discretionary,Consumer Durables,Consumer Durables,Paints,ok
+BERGEPAINT.NS,BERGER PAINTS INDIA LIMITED,CHEMICALS,CONSUMER DURABLES,mismatch,Consumer Discretionary,Consumer Durables,Consumer Durables,Paints,ok
+GODREJIND.NS,GODREJ INDUSTRIES LIMITED,CHEMICALS,CONGLOMERATE,mismatch,Diversified,Diversified,Diversified,Diversified,ok
+KANSAINER.NS,KANSAI NEROLAC PAINTS LIMITED,CHEMICALS,CONSUMER DURABLES,mismatch,Consumer Discretionary,Consumer Durables,Consumer Durables,Paints,ok
+SOTL.NS,SAVITA OIL TECHNOLOGIES LIMITED,CHEMICALS,ENERGY,mismatch,Energy,"Oil, Gas & Consumable Fuels",Petroleum Products,Lubricants,ok
+ADANIENT.NS,ADANI ENTERPRISES LIMITED,CONGLOMERATE,METALS,mismatch,Commodities,Metals & Mining,Metals & Minerals Trading,Trading - Minerals,ok
+BAJAJHLDNG.NS,BAJAJ HOLDINGS & INVESTMENT LIMITED,CONGLOMERATE,FINANCIAL SERVICES,mismatch,Financial Services,Financial Services,Finance,Holding Company,ok
+BBTC.NS,BOMBAY BURMAH TRADING CORPORATION,CONGLOMERATE,FMCG,mismatch,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Food Products,Packaged Foods,ok
+RELIANCE.NS,RELIANCE INDUSTRIES,CONGLOMERATE,ENERGY,mismatch,Energy,"Oil, Gas & Consumable Fuels",Petroleum Products,Refineries & Marketing,ok
+TATAINVEST.NS,TATA INVESTMENT CORPORATION LIMITED,CONGLOMERATE,FINANCIAL SERVICES,mismatch,Financial Services,Financial Services,Finance,Investment Company,ok
+DOMS.NS,DOMS INDUSTRIES LIMITED,CONSUMER DURABLES,FMCG,mismatch,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Household Products,Stationary,ok
+MANYAVAR.NS,VEDANT FASHIONS LIMITED,CONSUMER DURABLES,CONSUMER SERVICES,mismatch,Consumer Discretionary,Consumer Services,Retailing,Speciality Retail,ok
+PAGEIND.NS,PAGE INDUSTRIES LIMITED,CONSUMER DURABLES,TEXTILES,mismatch,Consumer Discretionary,Textiles,Textiles & Apparels,Garments & Apparels,ok
+PVRINOX.NS,PVR INOX LIMITED,CONSUMER SERVICES,MEDIA,mismatch,Consumer Discretionary,"Media, Entertainment & Publication",Entertainment,"Film Production, Distribution & Exhibition",ok
+VAIBHAVGBL.NS,VAIBHAV GLOBAL LIMITED,CONSUMER SERVICES,CONSUMER DURABLES,mismatch,Consumer Discretionary,Consumer Durables,Consumer Durables,"Gems, Jewellery And Watches",ok
+AVANTEL.NS,AVANTEL LIMITED,DEFENCE,INDUSTRIAL,mismatch,Industrials,Capital Goods,Aerospace & Defense,Aerospace & Defense,ok
+BDL.NS,BHARAT DYNAMICS LIMITED,DEFENCE,INDUSTRIAL,mismatch,Industrials,Capital Goods,Aerospace & Defense,Aerospace & Defense,ok
+BEL.NS,BHARAT ELECTRONICS LTD,DEFENCE,INDUSTRIAL,mismatch,Industrials,Capital Goods,Aerospace & Defense,Aerospace & Defense,ok
+BEML.NS,BHARAT EARTH MOVERS LIMITED,DEFENCE,INDUSTRIAL,mismatch,Industrials,Capital Goods,"Agricultural, Commercial & Construction Vehicles",Construction Vehicles,ok
+DATAPATTNS.NS,DATA PATTERNS (INDIA) LTD,DEFENCE,INDUSTRIAL,mismatch,Industrials,Capital Goods,Aerospace & Defense,Aerospace & Defense,ok
+GRSE.NS,GARDEN REACH SHIPBUILDERS & ENGINEERS,DEFENCE,INDUSTRIAL,mismatch,Industrials,Capital Goods,Aerospace & Defense,Aerospace & Defense,ok
+HAL.NS,HINDUSTAN AERONAUTICS LIMITED,DEFENCE,INDUSTRIAL,mismatch,Industrials,Capital Goods,Aerospace & Defense,Aerospace & Defense,ok
+MAZDOCK.NS,MAZAGON DOCK SHIPBUILDERS LTD,DEFENCE,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Manufacturing,Ship Building & Allied Services,ok
+ZENTEC.NS,ZEN TECHNOLOGIES LIMITED,DEFENCE,INDUSTRIAL,mismatch,Industrials,Capital Goods,Aerospace & Defense,Aerospace & Defense,ok
+GENUSPOWER.NS,GENUS POWER INFRASTRUCTURES LTD,ENERGY,INDUSTRIAL,mismatch,Industrials,Capital Goods,Electrical Equipment,Other Electrical Equipment,ok
+IEX.NS,INDIAN ENERGY EXCHANGE LIMITED,ENERGY,FINANCIAL SERVICES,mismatch,Financial Services,Financial Services,Capital Markets,Exchange and Data Platform,ok
+INOXWIND.NS,INOX WIND LIMITED,ENERGY,INDUSTRIAL,mismatch,Industrials,Capital Goods,Electrical Equipment,Heavy Electrical Equipment,ok
+PTCIL.NS,PTC INDIA FINANCIAL SERVICES LIMITED,ENERGY,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Products,Other Industrial Products,ok
+RTNINDIA.NS,RattanIndia Enterprises Limited,ENERGY,CONSUMER SERVICES,mismatch,Consumer Discretionary,Consumer Services,Retailing,E-Retail/ E-Commerce,ok
+SUZLON.NS,SUZLON ENERGY LIMITED,ENERGY,INDUSTRIAL,mismatch,Industrials,Capital Goods,Electrical Equipment,Heavy Electrical Equipment,ok
+SWSOLAR.NS,STERLING AND WILSON SOLAR LIMITED,ENERGY,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+NSLNISP.NS,NSL NISP LIMITED,HEALTHCARE,METALS,mismatch,Commodities,Metals & Mining,Ferrous Metals,Iron & Steel,ok
+3MINDIA.NS,3M INDIA LIMITED,INDUSTRIAL,CONGLOMERATE,mismatch,Diversified,Diversified,Diversified,Diversified,ok
+APLLTD.NS,APL LIMITED,INDUSTRIAL,HEALTHCARE,mismatch,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+BELRISE.NS,BELRISE INDUSTRIES LIMITED,INDUSTRIAL,AUTO COMPONENTS,mismatch,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+CENTURYPLY.NS,CENTURY PLYBOARDS (INDIA) LIMITED,INDUSTRIAL,CONSUMER DURABLES,mismatch,Consumer Discretionary,Consumer Durables,Consumer Durables,Plywood Boards/ Laminates,ok
+GREENPANEL.NS,GREENPANEL INDUSTRIES LIMITED,INDUSTRIAL,CONSUMER DURABLES,mismatch,Consumer Discretionary,Consumer Durables,Consumer Durables,Plywood Boards/ Laminates,ok
+TRIVENI.NS,TRIVENI ENGINEERING & INDUSTRIES LIMITED,INDUSTRIAL,FMCG,mismatch,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,Sugar,ok
+ADANIPORTS.NS,ADANI PORTS AND SPECIAL ECONOMIC ZONE LIMITED,INFRASTRUCTURE,LOGISTICS,mismatch,Services,Services,Transport Infrastructure,Port & Port services,ok
+ASHOKA.NS,ASHOKA BUILDCON LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+ENGINERSIN.NS,ENGINEERS INDIA LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+GMRAIRPORT.NS,GMR AIRPORTS INFRASTRUCTURE LIMITED,INFRASTRUCTURE,LOGISTICS,mismatch,Services,Services,Transport Infrastructure,Airport & Airport services,ok
+GPPL.NS,GUJARAT PIPAVAV PORT LIMITED,INFRASTRUCTURE,LOGISTICS,mismatch,Services,Services,Transport Infrastructure,Port & Port services,ok
+GRINFRA.NS,G R INFRAPROJECTS LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+IRB.NS,IRB INFRASTRUCTURE DEVELOPERS LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+IRCON.NS,IRCON INTERNATIONAL LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+JSWINFRA.NS,JSW INFRASTRUCTURE LIMITED,INFRASTRUCTURE,LOGISTICS,mismatch,Services,Services,Transport Infrastructure,Port & Port services,ok
+KEC.NS,KEC INTERNATIONAL LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+KNRCON.NS,KNR CONSTRUCTIONS LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+KPIL.NS,KALPATARU PROJECTS INTERNATIONAL,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+LT.NS,LARSEN & TOUBRO LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+MANINFRA.NS,MAN INFRACONSTRUCTION LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+NBCC.NS,NBCC (INDIA) LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+NCC.NS,NCC LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+PNCINFRA.NS,PNC INFRATECH LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+RITES.NS,RITES LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+RVNL.NS,RAIL VIKAS NIGAM LIMITED,INFRASTRUCTURE,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+WABAG.NS,VA TECH WABAG LIMITED,INFRASTRUCTURE,ENERGY,mismatch,Utilities,Utilities,Other Utilities,Water Supply & Management,ok
+ECLERX.NS,ECLERX SERVICES LIMITED,IT,CONSUMER SERVICES,mismatch,Services,Services,Commercial Services & Supplies,Business Process Outsourcing (BPO)/ Knowledge Process Outsourcing (KPO),ok
+FSL.NS,FIRSTSOURCE SOLUTIONS LIMITED,IT,CONSUMER SERVICES,mismatch,Services,Services,Commercial Services & Supplies,Business Process Outsourcing (BPO)/ Knowledge Process Outsourcing (KPO),ok
+INDIAMART.NS,INDIAMART INTERMESH LIMITED,IT,CONSUMER SERVICES,mismatch,Consumer Discretionary,Consumer Services,Retailing,Internet & Catalogue Retail,ok
+JUSTDIAL.NS,JUST DIAL LIMITED,IT,CONSUMER SERVICES,mismatch,Consumer Discretionary,Consumer Services,Retailing,Internet & Catalogue Retail,ok
+NAUKRI.NS,INFO EDGE (INDIA) LIMITED,IT,CONSUMER SERVICES,mismatch,Consumer Discretionary,Consumer Services,Retailing,Internet & Catalogue Retail,ok
+NIITLTD.NS,NIIT LIMITED,IT,CONSUMER SERVICES,mismatch,Consumer Discretionary,Consumer Services,Other Consumer Services,Education,ok
+PACEDIGITK.NS,Pace Digitek Limited,IT,TELECOM,mismatch,Telecommunication,Telecommunication,Telecom - Services,Telecom - Infrastructure,ok
+RAILTEL.NS,RAILTEL CORPORATION OF INDIA LIMITED,IT,TELECOM,mismatch,Telecommunication,Telecommunication,Telecom - Services,Other Telecom Services,ok
+REDINGTON.NS,REDINGTON LIMITED,IT,CONSUMER SERVICES,mismatch,Services,Services,Commercial Services & Supplies,Trading & Distributors,ok
+ROUTE.NS,ROUTE MOBILE LIMITED,IT,TELECOM,mismatch,Telecommunication,Telecommunication,Telecom - Services,Other Telecom Services,ok
+TECHNOE.NS,TECHNO ELECTRIC & ENGINEERING CO,IT,INDUSTRIAL,mismatch,Industrials,Construction,Construction,Civil Construction,ok
+AEGISLOG.NS,AEGIS LOGISTICS LIMITED,LOGISTICS,ENERGY,mismatch,Energy,"Oil, Gas & Consumable Fuels",Gas,Trading - Gas,ok
+ALLCARGO.NS,ALLCARGO LOGISTICS LIMITED,LOGISTICS,CONSUMER SERVICES,mismatch,Services,Services,Transport Services,Logistics Solution Provider,ok
+BLUEDART.NS,BLUE DART EXPRESS LIMITED,LOGISTICS,CONSUMER SERVICES,mismatch,Services,Services,Transport Services,Logistics Solution Provider,ok
+CONCOR.NS,CONTAINER CORPORATION OF INDIA LIMITED,LOGISTICS,CONSUMER SERVICES,mismatch,Services,Services,Transport Services,Logistics Solution Provider,ok
+DELHIVERY.NS,DELHIVERY LIMITED,LOGISTICS,CONSUMER SERVICES,mismatch,Services,Services,Transport Services,Logistics Solution Provider,ok
+GESHIP.NS,GREAT EASTERN SHIPPING COMPANY LIMITED,LOGISTICS,CONSUMER SERVICES,mismatch,Services,Services,Transport Services,Shipping,ok
+MAHLOG.NS,MAHINDRA LOGISTICS LIMITED,LOGISTICS,CONSUMER SERVICES,mismatch,Services,Services,Transport Services,Logistics Solution Provider,ok
+SCI.NS,SHIPPING CORPORATION OF INDIA LIMITED,LOGISTICS,CONSUMER SERVICES,mismatch,Services,Services,Transport Services,Shipping,ok
+VRLLOG.NS,VRL LOGISTICS LIMITED,LOGISTICS,CONSUMER SERVICES,mismatch,Services,Services,Transport Services,Logistics Solution Provider,ok
+APLAPOLLO.NS,APL APOLLO TUBES LIMITED,METALS,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Products,Iron & Steel Products,ok
+COALINDIA.NS,COAL INDIA LIMITED,METALS,ENERGY,mismatch,Energy,"Oil, Gas & Consumable Fuels",Consumable Fuels,Coal,ok
+ELECTCAST.NS,Electrosteel Castings,METALS,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Products,Iron & Steel Products,ok
+GPIL.NS,GODAWARI POWER AND ISPAT LIMITED,METALS,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Products,Iron & Steel Products,ok
+HEG.NS,HEG LIMITED,METALS,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Products,Electrodes & Refractories,ok
+JINDALSAW.NS,JINDAL SAW LIMITED,METALS,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Products,Iron & Steel Products,ok
+MAHSEAMLES.NS,MAHARASHTRA SEAMLESS LIMITED,METALS,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Products,Iron & Steel Products,ok
+MIDHANI.NS,MISHRA DHATU NIGAM LIMITED,METALS,INDUSTRIAL,mismatch,Industrials,Capital Goods,Aerospace & Defense,Aerospace & Defense,ok
+RATNAMANI.NS,RATNAMANI METALS & TUBES LIMITED,METALS,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Products,Iron & Steel Products,ok
+SHYAMMETL.NS,SHYAM METALICS AND ENERGY LIMITED,METALS,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Products,Iron & Steel Products,ok
+USHAMART.NS,USHA MARTIN LIMITED,METALS,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Products,Iron & Steel Products,ok
+WELCORP.NS,WELSPUN CORP LIMITED,METALS,INDUSTRIAL,mismatch,Industrials,Capital Goods,Industrial Products,Iron & Steel Products,ok
+CHALET.NS,CHALET HOTELS LIMITED,REALTY,CONSUMER SERVICES,mismatch,Consumer Discretionary,Consumer Services,Leisure Services,Hotels & Resorts,ok
+DBREALTY.NS,D B REALTY LIMITED,REALTY,CONSUMER SERVICES,mismatch,Consumer Discretionary,Consumer Services,Leisure Services,Hotels & Resorts,ok
+HEMIPROP.NS,HEMISPHERE PROPERTIES INDIA LIMITED,REALTY,CONSUMER SERVICES,mismatch,Services,Services,Commercial Services & Supplies,Diversified Commercial Services,ok
+HATHWAY.NS,HATHWAY CABLE & DATACOM LIMITED,TELECOM,MEDIA,mismatch,Consumer Discretionary,"Media, Entertainment & Publication",Entertainment,TV Broadcasting & Software Production,ok
+INDOCO.NS,INDO COUNT INDUSTRIES LIMITED,TEXTILES,HEALTHCARE,mismatch,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+RAYMOND.NS,RAYMOND LIMITED,TEXTILES,REALTY,mismatch,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+MMTC.NS,MMTC LIMITED,TRADING,CONSUMER SERVICES,mismatch,Services,Services,Commercial Services & Supplies,Trading & Distributors,ok
+MAHINDCIE.NS,MAHINDRA CIE AUTOMOTIVE LIMITED,AUTO COMPONENTS,,no_data,,,,,no_breadcrumb
+MINDAIND.NS,MINDA INDUSTRIES LIMITED,AUTO COMPONENTS,,no_data,,,,,no_breadcrumb
+TATAMOTORS.NS,TATA MOTORS LIMITED,AUTOMOBILE,,no_data,,,,,no_breadcrumb
+PHILIPCARB.NS,PHILLIPS CARBON BLACK LIMITED,CHEMICALS,,no_data,,,,,no_breadcrumb
+ZOMATO.NS,ZOMATO LIMITED,CONSUMER SERVICES,,no_data,,,,,no_breadcrumb
+MODEFENCE.NS,MOTILAL OSWAL DEFENCE ETF,DEFENCE,,no_data,,,,,no_breadcrumb
+KPENERGY.NS,K P ENERGY LIMITED,ENERGY,,no_data,,,,,no_breadcrumb
+SWANENERGY.NS,SWAN ENERGY LIMITED,ENERGY,,no_data,,,,,no_breadcrumb
+GOLDBEES.NS,Nippon India ETF Gold BEES,ETF,,no_data,,,,,no_breadcrumb
+SILVERBEES.NS,Nippon India Silver ETF,ETF,,no_data,,,,,no_breadcrumb
+MCDOWELL-N.NS,UNITED SPIRITS LIMITED,FMCG,,no_data,,,,,no_breadcrumb
+SBB.NS,SUN PHARMA ADVANCED RESEARCH COMPANY LIMITED,HEALTHCARE,,no_data,,,,,no_breadcrumb
+SEQUENT.NS,SEQUENT SCIENTIFIC LIMITED,HEALTHCARE,,no_data,,,,,no_breadcrumb
+SUVENPHAR.NS,SUVEN PHARMACEUTICALS LIMITED,HEALTHCARE,,no_data,,,,,no_breadcrumb
+ESSELPACK.NS,ESSEL PROPACK LIMITED,INDUSTRIAL,,no_data,,,,,no_breadcrumb
+GEPIL.NS,GE POWER INDIA LIMITED,INDUSTRIAL,,no_data,,,,,no_breadcrumb
+LAXMIMACH.NS,LAKSHMI MACHINE WORKS LIMITED,INDUSTRIAL,,no_data,,,,,no_breadcrumb
+INFIBEAM.NS,INFIBEAM AVENUES LIMITED,IT,,no_data,,,,,no_breadcrumb
+LTIM.NS,LTIMindtree Limited,IT,,no_data,,,,,no_breadcrumb
+WELSPUNIND.NS,WELSPUN INDIA LIMITED,TEXTILES,,no_data,,,,,no_breadcrumb
+APOLLOTYRE.NS,APOLLO TYRES LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Tyres & Rubber Products,ok
+ASAHIINDIA.NS,ASAHI INDIA GLASS LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+BALKRISIND.NS,BALKRISHNA INDUSTRIES LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Tyres & Rubber Products,ok
+BHARATFORG.NS,BHARAT FORGE LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+BOSCHLTD.NS,BOSCH LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+CEATLTD.NS,CEAT LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Tyres & Rubber Products,ok
+CIEINDIA.NS,CIE INDIA,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+CRAFTSMAN.NS,CRAFTSMAN AUTOMATION LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+ENDURANCE.NS,ENDURANCE TECHNOLOGIES LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+EXIDEIND.NS,EXIDE INDUSTRIES LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+FIEMIND.NS,FIEM INDUSTRIES LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+IGARASHI.NS,IGARASHI MOTORS INDIA LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+JAMNAAUTO.NS,JAMNA AUTO INDUSTRIES LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+JBMA.NS,JBM AUTO LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+JKTYRE.NS,JK TYRE & INDUSTRIES LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Tyres & Rubber Products,ok
+MINDACORP.NS,MINDA CORPORATION LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+MOTHERSON.NS,SAMVARDHANA MOTHERSON INTERNATIONAL LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+MRF.NS,MRF LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Tyres & Rubber Products,ok
+MSUMI.NS,MOTHERSON SUMI WIRING INDIA LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+RKFORGE.NS,RAMKRISHNA FORGINGS LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+SCHAEFFLER.NS,SCHAEFFLER INDIA LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+SONACOMS.NS,Sona Blw Precision Forgings Ltd,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+SUNDRMFAST.NS,SUNDRAM FASTENERS LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+SUPRAJIT.NS,SUPRAJIT ENGINEERING LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+TIINDIA.NS,TUBE INVESTMENTS OF INDIA LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+TVSSRICHAK.NS,TVS SRICHAKRA LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Tyres & Rubber Products,ok
+UNOMINDA.NS,UNO MINDA LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+VARROC.NS,VARROC ENGINEERING LIMITED,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+ZFCVINDIA.NS,ZF COMMERCIAL VEHICLE CONTROL SYSTEMS,AUTO COMPONENTS,AUTO COMPONENTS,match,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments,ok
+BAJAJ-AUTO.NS,BAJAJ AUTO LIMITED,AUTOMOBILE,AUTOMOBILE,match,Consumer Discretionary,Automobile and Auto Components,Automobiles,2/3 Wheelers,ok
+EICHERMOT.NS,EICHER MOTORS LIMITED,AUTOMOBILE,AUTOMOBILE,match,Consumer Discretionary,Automobile and Auto Components,Automobiles,2/3 Wheelers,ok
+HEROMOTOCO.NS,HERO MOTOCORP LIMITED,AUTOMOBILE,AUTOMOBILE,match,Consumer Discretionary,Automobile and Auto Components,Automobiles,2/3 Wheelers,ok
+M&M.NS,MAHINDRA & MAHINDRA LTD,AUTOMOBILE,AUTOMOBILE,match,Consumer Discretionary,Automobile and Auto Components,Automobiles,Passenger Cars & Utility Vehicles,ok
+MARUTI.NS,MARUTI SUZUKI INDIA LIMITED,AUTOMOBILE,AUTOMOBILE,match,Consumer Discretionary,Automobile and Auto Components,Automobiles,Passenger Cars & Utility Vehicles,ok
+OLECTRA.NS,OLECTRA GREENTECH LIMITED,AUTOMOBILE,AUTOMOBILE,match,Consumer Discretionary,Automobile and Auto Components,Automobiles,Passenger Cars & Utility Vehicles,ok
+TVSMOTOR.NS,TVS MOTOR COMPANY LTD,AUTOMOBILE,AUTOMOBILE,match,Consumer Discretionary,Automobile and Auto Components,Automobiles,2/3 Wheelers,ok
+AUBANK.NS,AU SMALL FINANCE BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Other Bank,ok
+AXISBANK.NS,AXIS BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+BANDHANBNK.NS,BANDHAN BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+BANKBARODA.NS,BANK OF BARODA,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Public Sector Bank,ok
+BANKINDIA.NS,BANK OF INDIA,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Public Sector Bank,ok
+CANBK.NS,CANARA BANK,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Public Sector Bank,ok
+CENTRALBK.NS,CENTRAL BANK OF INDIA,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Public Sector Bank,ok
+CSBBANK.NS,CSB BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+CUB.NS,CITY UNION BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+EQUITASBNK.NS,EQUITAS SMALL FINANCE BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Other Bank,ok
+FEDERALBNK.NS,FEDERAL BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+HDFCBANK.NS,HDFC BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+ICICIBANK.NS,ICICI BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+IDBI.NS,IDBI BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+IDFCFIRSTB.NS,IDFC FIRST BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+INDIANB.NS,INDIAN BANK,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Public Sector Bank,ok
+INDUSINDBK.NS,INDUSIND BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+IOB.NS,INDIAN OVERSEAS BANK,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Public Sector Bank,ok
+J&KBANK.NS,JAMMU & KASHMIR BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+KARURVYSYA.NS,KARUR VYSYA BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+KOTAKBANK.NS,KOTAK MAHINDRA BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+MAHABANK.NS,BANK OF MAHARASHTRA,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Public Sector Bank,ok
+PNB.NS,PUNJAB NATIONAL BANK,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Public Sector Bank,ok
+RBLBANK.NS,RBL BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+SBIN.NS,STATE BANK OF INDIA,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Public Sector Bank,ok
+UCOBANK.NS,UCO BANK,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Public Sector Bank,ok
+UJJIVANSFB.NS,UJJIVAN SMALL FINANCE BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Other Bank,ok
+UNIONBANK.NS,UNION BANK OF INDIA,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Public Sector Bank,ok
+YESBANK.NS,YES BANK LIMITED,BANKING,BANKING,match,Financial Services,Financial Services,Banks,Private Sector Bank,ok
+ACC.NS,ACC LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+AMBUJACEM.NS,AMBUJA CEMENTS LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+BIRLACORPN.NS,BIRLA CORPORATION LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+DALBHARAT.NS,DALMIA BHARAT LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+GRASIM.NS,GRASIM INDUSTRIES LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+HEIDELBERG.NS,HEIDELBERG CEMENT INDIA LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+INDIACEM.NS,THE INDIA CEMENTS LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+JKCEMENT.NS,JK CEMENT LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+JKLAKSHMI.NS,JK LAKSHMI CEMENT LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+NUVOCO.NS,NUVOCO VISTAS CORPORATION LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+PRSMJOHNSN.NS,PRISM JOHNSON LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+RAMCOCEM.NS,THE RAMCO CEMENTS LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+SHREECEM.NS,SHREE CEMENT LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+STARCEMENT.NS,STAR CEMENT LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+ULTRACEMCO.NS,ULTRATECH CEMENT LIMITED,CEMENT,CEMENT,match,Commodities,Construction Materials,Cement & Cement Products,Cement & Cement Products,ok
+AARTIIND.NS,AARTI INDUSTRIES LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+ACI.NS,ARCHEAN CHEMICAL INDUSTRIES LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+ALKYLAMINE.NS,ALKYL AMINES CHEMICALS LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+ATUL.NS,ATUL LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+BALAMINES.NS,BALAJI AMINES LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+BASF.NS,BASF INDIA LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+BAYERCROP.NS,BAYER CROPSCIENCE LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Pesticides & Agrochemicals,ok
+BHARATRAS.NS,BHARAT RASAYAN LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Pesticides & Agrochemicals,ok
+CHAMBLFERT.NS,CHAMBAL FERTILISERS AND CHEMICALS LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Fertilizers,ok
+CHEMPLASTS.NS,CHEMPLAST SANMAR LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Commodity Chemicals,ok
+CLEAN.NS,CLEAN SCIENCE AND TECHNOLOGY,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+COROMANDEL.NS,COROMANDEL INTERNATIONAL LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Fertilizers,ok
+DEEPAKFERT.NS,DEEPAK FERTILIZERS & PETR,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Commodity Chemicals,ok
+DEEPAKNTR.NS,DEEPAK NITRITE LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+DHANUKA.NS,DHANUKA AGRITECH LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Pesticides & Agrochemicals,ok
+FACT.NS,FERTILISERS AND CHEMICALS TRAVANCORE LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Fertilizers,ok
+FINEORG.NS,FINE ORGANIC INDUSTRIES LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+FLUOROCHEM.NS,GUJARAT FLUOROCHEMICALS LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+GNFC.NS,GUJARAT NARMADA VALLEY FERTILIZERS & CHEMICALS LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Commodity Chemicals,ok
+GSFC.NS,GUJARAT STATE FERTILIZERS & CHEMICALS,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Fertilizers,ok
+GUJALKALI.NS,GUJARAT ALKALIES AND CHEMICALS LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Commodity Chemicals,ok
+HSCL.NS,HIMADRI SPECIALITY CHEMICAL LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Carbon Black,ok
+JUBLINGREA.NS,JUBILANT INGREVIA LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+LINDEINDIA.NS,LINDE INDIA LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Industrial Gases,ok
+LXCHEM.NS,LAXMI ORGANIC INDUSTRIES LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+NAVINFLUOR.NS,NAVIN FLUORINE INTERNATIONAL LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+NFL.NS,NATIONAL FERTILIZERS LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Fertilizers,ok
+NOCIL.NS,NOCIL LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+PCBL.NS,PHILLIPS CARBON BLACK LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Carbon Black,ok
+PIDILITIND.NS,PIDILITE INDUSTRIES LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+PIIND.NS,PI INDUSTRIES LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Pesticides & Agrochemicals,ok
+RAIN.NS,RAIN INDUSTRIES LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Petrochemicals,ok
+RALLIS.NS,RALLIS INDIA LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Pesticides & Agrochemicals,ok
+RCF.NS,RASHTRIYA CHEMICALS & FERTILIZERS LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Fertilizers,ok
+SHARDACROP.NS,SHARDA CROPCHEM LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Pesticides & Agrochemicals,ok
+SOLARINDS.NS,SOLAR INDUSTRIES INDIA LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Explosives,ok
+SRF.NS,SRF LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Commodity Chemicals,ok
+SUDARSCHEM.NS,SUDARSHAN CHEMICAL INDUSTRIES LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Dyes And Pigments,ok
+SUMICHEM.NS,SUMITOMO CHEMICAL INDIA LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Pesticides & Agrochemicals,ok
+TATACHEM.NS,TATA CHEMICALS LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Commodity Chemicals,ok
+UPL.NS,UPL LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Fertilizers & Agrochemicals,Pesticides & Agrochemicals,ok
+VINATIORGA.NS,VINATI ORGANICS LIMITED,CHEMICALS,CHEMICALS,match,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals,ok
+AMBER.NS,AMBER ENTERPRISES INDIA LTD,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Household Appliances,ok
+BATAINDIA.NS,BATA INDIA LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Footwear,ok
+BLUESTARCO.NS,BLUE STAR LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Household Appliances,ok
+CAMPUS.NS,CAMPUS ACTIVEWEAR LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Footwear,ok
+CELLO.NS,CELLO WORLD LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Houseware,ok
+CERA.NS,CERA SANITARYWARE LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Sanitary Ware,ok
+CROMPTON.NS,CROMPTON GREAVES CONSUMER ELECTRICALS LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Household Appliances,ok
+DIXON.NS,DIXON TECHNOLOGIES (INDIA) LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Consumer Electronics,ok
+HAVELLS.NS,HAVELLS INDIA LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Consumer Electronics,ok
+IFBIND.NS,IFB INDUSTRIES LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Household Appliances,ok
+KAJARIACER.NS,KAJARIA CERAMICS LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Ceramics,ok
+KALYANKJIL.NS,KALYAN JEWELLERS INDIA LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,"Gems, Jewellery And Watches",ok
+METROBRAND.NS,METRO BRANDS LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Footwear,ok
+ORIENTELEC.NS,ORIENT ELECTRIC LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Household Appliances,ok
+PGEL.NS,PG Electroplast Limited,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Consumer Electronics,ok
+RAJESHEXPO.NS,RAJESH EXPORTS LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,"Gems, Jewellery And Watches",ok
+RELAXO.NS,RELAXO FOOTWEARS LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Footwear,ok
+SFL.NS,SHEELA FOAM LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,"Furniture, Home Furnishing",ok
+SOMANYCERA.NS,SOMANY CERAMICS LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Ceramics,ok
+SYMPHONY.NS,SYMPHONY LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Household Appliances,ok
+TITAN.NS,TITAN COMPANY LTD,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,"Gems, Jewellery And Watches",ok
+TTKPRESTIG.NS,TTK PRESTIGE LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Household Appliances,ok
+VGUARD.NS,V-GUARD INDUSTRIES LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Household Appliances,ok
+VIPIND.NS,VIP INDUSTRIES LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Plastic Products - Consumer,ok
+VOLTAS.NS,VOLTAS LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Household Appliances,ok
+WHIRLPOOL.NS,WHIRLPOOL OF INDIA LIMITED,CONSUMER DURABLES,CONSUMER DURABLES,match,Consumer Discretionary,Consumer Durables,Consumer Durables,Household Appliances,ok
+ABFRL.NS,ADITYA BIRLA FASHION AND RETAIL LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Retailing,Speciality Retail,ok
+BLS.NS,BLS INTERNATIONAL SERVICES LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,"Tour, Travel Related Services",ok
+DELTACORP.NS,DELTA CORP LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,Amusement Parks/ Other Recreation,ok
+DEVYANI.NS,DEVYANI INTERNATIONAL LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,Restaurants,ok
+DMART.NS,AVENUE SUPERMARTS LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Retailing,Diversified Retail,ok
+EASEMYTRIP.NS,EASY TRIP PLANNERS LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,"Tour, Travel Related Services",ok
+EIHOTEL.NS,EIH LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,Hotels & Resorts,ok
+INDHOTEL.NS,THE INDIAN HOTELS COMPANY LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,Hotels & Resorts,ok
+IRCTC.NS,INDIAN RAILWAY CATERING AND TOURISM CORPORATION LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,"Tour, Travel Related Services",ok
+ITDC.NS,INDIA TOURISM DEVELOPMENT CORPORATION LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,Hotels & Resorts,ok
+JUBLFOOD.NS,JUBILANT FOODWORKS LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,Restaurants,ok
+LEMONTREE.NS,LEMON TREE HOTELS LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,Hotels & Resorts,ok
+MHRIL.NS,MAHINDRA HOLIDAYS & RESORTS INDIA LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,Hotels & Resorts,ok
+NYKAA.NS,FSN E-Commerce Ventures Ltd,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Retailing,E-Retail/ E-Commerce,ok
+QUESS.NS,QUESS CORP LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Services,Services,Commercial Services & Supplies,Diversified Commercial Services,ok
+SAPPHIRE.NS,SAPPHIRE FOODS INDIA LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,Restaurants,ok
+SHOPERSTOP.NS,SHOPPERS STOP LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Retailing,Diversified Retail,ok
+SIS.NS,SECURITY AND INTELLIGENCE SERVICES (INDIA) LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Other Consumer Services,Other Consumer Services,ok
+TAJGVK.NS,TAJ GVK HOTELS & RESORTS LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,Hotels & Resorts,ok
+TBOTEK.NS,TBO TEK LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,"Tour, Travel Related Services",ok
+TEAMLEASE.NS,TEAMLEASE SERVICES LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Services,Services,Commercial Services & Supplies,Diversified Commercial Services,ok
+THOMASCOOK.NS,THOMAS COOK (INDIA) LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,"Tour, Travel Related Services",ok
+TRENT.NS,TRENT LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Retailing,Speciality Retail,ok
+WESTLIFE.NS,WESTLIFE DEVELOPMENT LIMITED,CONSUMER SERVICES,CONSUMER SERVICES,match,Consumer Discretionary,Consumer Services,Leisure Services,Restaurants,ok
+ADANIENSOL.NS,ADANI ENERGY SOLUTIONS LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Power Distribution,ok
+ADANIGREEN.NS,ADANI GREEN ENERGY LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Power Generation,ok
+ADANIPOWER.NS,ADANI POWER LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Integrated Power Utilities,ok
+ASIANENE.NS,ASIAN ENERGY SERVICES LTD,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Oil,Oil Equipment & Services,ok
+ATGL.NS,ADANI TOTAL GAS LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Gas,LPG/CNG/PNG/LNG Supplier,ok
+BPCL.NS,BHARAT PETROLEUM CORPORATION LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Petroleum Products,Refineries & Marketing,ok
+CASTROLIND.NS,CASTROL INDIA LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Petroleum Products,Lubricants,ok
+CESC.NS,CESC LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Integrated Power Utilities,ok
+CHENNPETRO.NS,CHENNAI PETROLEUM CORPORATION,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Petroleum Products,Refineries & Marketing,ok
+GAIL.NS,GAIL (INDIA) LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Gas,Gas Transmission/Marketing,ok
+GSPL.NS,GUJARAT STATE PETRONET LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Gas,Gas Transmission/Marketing,ok
+GUJGASLTD.NS,GUJARAT GAS LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Gas,LPG/CNG/PNG/LNG Supplier,ok
+GULFOILLUB.NS,GULF OIL LUBRICANTS INDIA LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Petroleum Products,Lubricants,ok
+HINDPETRO.NS,HINDUSTAN PETROLEUM CORPORATION LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Petroleum Products,Refineries & Marketing,ok
+IGL.NS,INDRAPRASTHA GAS LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Gas,LPG/CNG/PNG/LNG Supplier,ok
+IOC.NS,INDIAN OIL CORPORATION LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Petroleum Products,Refineries & Marketing,ok
+JPPOWER.NS,JAIPRAKASH POWER VENTURES LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Power Generation,ok
+JSWENERGY.NS,JSW ENERGY LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Power Generation,ok
+KPEL.NS,K P Energy Limited,ENERGY,ENERGY,match,Utilities,Power,Power,Power Generation,ok
+KPIGREEN.NS,KPI GREEN ENERGY LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Power Generation,ok
+MGL.NS,MAHANAGAR GAS LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Gas,LPG/CNG/PNG/LNG Supplier,ok
+MRPL.NS,MANGALORE REFINERY AND PETROCHEMICALS LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Petroleum Products,Refineries & Marketing,ok
+NAVA.NS,NAVA LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Power Generation,ok
+NHPC.NS,NHPC LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Power Generation,ok
+NLCINDIA.NS,NLC INDIA LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Power Generation,ok
+NTPC.NS,NTPC LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Power Generation,ok
+OIL.NS,OIL INDIA LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Oil,Oil Exploration & Production,ok
+ONGC.NS,OIL AND NATURAL GAS CORPORATION LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Oil,Oil Exploration & Production,ok
+PETRONET.NS,PETRONET LNG LIMITED,ENERGY,ENERGY,match,Energy,"Oil, Gas & Consumable Fuels",Gas,LPG/CNG/PNG/LNG Supplier,ok
+POWERGRID.NS,POWER GRID CORPORATION OF INDIA LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Power - Transmission,ok
+RPOWER.NS,RELIANCE POWER LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Power Generation,ok
+SJVN.NS,SJVN LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Power Generation,ok
+TATAPOWER.NS,TATA POWER COMPANY LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Integrated Power Utilities,ok
+TORNTPOWER.NS,TORRENT POWER LIMITED,ENERGY,ENERGY,match,Utilities,Power,Power,Integrated Power Utilities,ok
+360ONE.NS,360 ONE WAM LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,Stockbroking & Allied,ok
+AADHARHFC.NS,AADHAR HOUSING FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Housing Finance Company,ok
+AAVAS.NS,AAVAS FINANCIERS LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Housing Finance Company,ok
+ABCAPITAL.NS,ADITYA BIRLA CAPITAL LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Investment Company,ok
+ABSLAMC.NS,ADITYA BIRLA SUN LIFE AMC LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,Asset Management Company,ok
+ANANDRATHI.NS,ANAND RATHI WEALTH LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,Financial Products Distributor,ok
+ANGELONE.NS,ANGEL ONE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,Stockbroking & Allied,ok
+APTUS.NS,APTUS VALUE HOUSING FINANCE INDIA,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Housing Finance Company,ok
+BAJAJFINSV.NS,BAJAJ FINSERV LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Holding Company,ok
+BAJFINANCE.NS,BAJAJ FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+BSE.NS,BSE Ltd,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,Exchange and Data Platform,ok
+CAMS.NS,COMPUTER AGE MANAGEMENT SERVICES LTD,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,"Depositories, Clearing Houses and Other Intermediaries",ok
+CANFINHOME.NS,CAN FIN HOMES LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Housing Finance Company,ok
+CDSL.NS,CENTRAL DEPOSITORY SERVICES (INDIA) LTD,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,"Depositories, Clearing Houses and Other Intermediaries",ok
+CENTRUM.NS,CENTRUM CAPITAL LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Other Financial Services,ok
+CGCL.NS,CAPRI GLOBAL CAPITAL LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+CHOLAFIN.NS,CHOLAMANDALAM INVESTMENT AND FINANCE COMPANY LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+CHOLAHLDNG.NS,CHOLAMANDALAM FINANCIAL HOLDINGS,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Investment Company,ok
+CREDITACC.NS,CREDITACCESS GRAMEEN LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Microfinance Institutions,ok
+CRISIL.NS,CRISIL LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Other Financial Services,ok
+DHANI.NS,DHANI SERVICES LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Other Financial Services,ok
+EDELWEISS.NS,EDELWEISS FINANCIAL SERVICES LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Holding Company,ok
+EQUITAS.NS,EQUITAS HOLDINGS LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Investment Company,ok
+FIVESTAR.NS,FIVE STAR BUSINESS FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+GICRE.NS,GENERAL INSURANCE CORPORATION OF INDIA,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Insurance,General Insurance,ok
+GODIGIT.NS,GO DIGIT GENERAL INSURANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Insurance,General Insurance,ok
+HDFCAMC.NS,HDFC ASSET MANAGEMENT COMPANY LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,Asset Management Company,ok
+HDFCLIFE.NS,HDFC LIFE INSURANCE COMPANY LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Insurance,Life Insurance,ok
+HOMEFIRST.NS,HOME FIRST FINANCE COMPANY INDIA,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Housing Finance Company,ok
+HUDCO.NS,HOUSING & URBAN DEVELOPMENT CORPORATION LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Financial Institution,ok
+ICICIGI.NS,ICICI LOMBARD GENERAL INSURANCE COMPANY LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Insurance,General Insurance,ok
+ICICIPRULI.NS,ICICI PRUDENTIAL LIFE INSURANCE COMPANY LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Insurance,Life Insurance,ok
+IDFC.NS,IDFC LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Holding Company,ok
+IFCI.NS,IFCI LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Financial Institution,ok
+IIFL.NS,IIFL FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+INDOSTAR.NS,INDOSTAR CAPITAL FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+IREDA.NS,INDIAN RENEWABLE ENERGY DEV AGENCY,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Financial Institution,ok
+IRFC.NS,INDIAN RAILWAY FINANCE CORPORATION LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Financial Institution,ok
+JIOFIN.NS,JIO FINANCIAL SERVICES LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Investment Company,ok
+JMFINANCIL.NS,JM FINANCIAL LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Holding Company,ok
+KFINTECH.NS,KFIN TECHNOLOGIES LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,"Depositories, Clearing Houses and Other Intermediaries",ok
+LICHSGFIN.NS,LIC HOUSING FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Housing Finance Company,ok
+LICI.NS,LIFE INSURANCE CORPORATION OF INDIA,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Insurance,Life Insurance,ok
+LTF.NS,L&T FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+M&MFIN.NS,MAHINDRA & MAHINDRA FINANCIAL SERVICES LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+MANAPPURAM.NS,MANAPPURAM FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+MCX.NS,MULTI COMMODITY EXCHANGE OF INDIA LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,Exchange and Data Platform,ok
+MFSL.NS,MAX FINANCIAL SERVICES LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Insurance,Life Insurance,ok
+MOTILALOFS.NS,MOTILAL OSWAL FINANCIAL SERVICES LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,Stockbroking & Allied,ok
+MUTHOOTFIN.NS,MUTHOOT FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+NAM-INDIA.NS,NIPPON LIFE INDIA ASSET MANAGEMENT,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,Asset Management Company,ok
+NIACL.NS,THE NEW INDIA ASSURANCE CO LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Insurance,General Insurance,ok
+NUVAMA.NS,NUVAMA WEALTH MANAGEMENT LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,Stockbroking & Allied,ok
+PAYTM.NS,ONE97 COMMUNICATIONS LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Financial Technology (Fintech),Financial Technology (Fintech),ok
+PEL.NS,PIRAMAL ENTERPRISES LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+PFC.NS,POWER FINANCE CORPORATION LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Financial Institution,ok
+PNBHOUSING.NS,PNB HOUSING FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Housing Finance Company,ok
+POLICYBZR.NS,PB FINTECH LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Financial Technology (Fintech),Financial Technology (Fintech),ok
+POONAWALLA.NS,POONAWALLA FINCORP LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+RECLTD.NS,REC LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Financial Institution,ok
+RELIGARE.NS,RELIGARE ENTERPRISES LTD,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Investment Company,ok
+REPCOHOME.NS,REPCO HOME FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Housing Finance Company,ok
+SAMMAANCAP.NS,SAMMAAN CAPITAL LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Housing Finance Company,ok
+SBFC.NS,SBFC FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+SBICARD.NS,SBI CARDS AND PAYMENT SERVICES,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+SBILIFE.NS,SBI LIFE INSURANCE COMPANY LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Insurance,Life Insurance,ok
+SHRIRAMFIN.NS,SHRIRAM FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+STARHEALTH.NS,STAR HEALTH AND ALLIED INSURANCE COMPANY LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Insurance,General Insurance,ok
+SUNDARMFIN.NS,SUNDARAM FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Non Banking Financial Company (NBFC),ok
+TVSHLTD.NS,TVS HOLDINGS LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Investment Company,ok
+UTIAMC.NS,UTI ASSET MANAGEMENT COMPANY LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Capital Markets,Asset Management Company,ok
+VLSFINANCE.NS,VLS FINANCE LIMITED,FINANCIAL SERVICES,FINANCIAL SERVICES,match,Financial Services,Financial Services,Finance,Investment Company,ok
+AWL.NS,ADANI WILMAR LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,Edible Oil,ok
+BALRAMCHIN.NS,BALRAMPUR CHINI MILLS LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,Sugar,ok
+BIKAJI.NS,BIKAJI FOODS INTERNATIONAL LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Food Products,Packaged Foods,ok
+BRITANNIA.NS,BRITANNIA INDUSTRIES LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Food Products,Packaged Foods,ok
+CCL.NS,CCL PRODUCTS (INDIA) LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,Tea & Coffee,ok
+COLPAL.NS,COLGATE PALMOLIVE (INDIA) LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Personal Products,Personal Care,ok
+DABUR.NS,DABUR INDIA LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Personal Products,Personal Care,ok
+EIDPARRY.NS,EID PARRY INDIA LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Food Products,Other Food Products,ok
+EMAMILTD.NS,EMAMI LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Personal Products,Personal Care,ok
+GILLETTE.NS,GILLETTE INDIA LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Personal Products,Personal Care,ok
+GODREJCP.NS,GODREJ CONSUMER PRODUCTS LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Personal Products,Personal Care,ok
+HATSUN.NS,HATSUN AGRO PRODUCT LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Food Products,Dairy Products,ok
+HINDUNILVR.NS,HINDUSTAN UNILEVER LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Diversified FMCG,Diversified FMCG,ok
+HONASA.NS,HONASA CONSUMER LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Personal Products,Personal Care,ok
+ITC.NS,ITC LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Diversified FMCG,Diversified FMCG,ok
+JYOTHYLAB.NS,JYOTHY LABS LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Household Products,Household Products,ok
+KRBL.NS,KRBL LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,Other Agricultural Products,ok
+MARICO.NS,MARICO LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,Edible Oil,ok
+NESTLEIND.NS,NESTLE INDIA LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Food Products,Packaged Foods,ok
+PATANJALI.NS,PATANJALI FOODS LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,Edible Oil,ok
+PGHH.NS,PROCTER & GAMBLE HYGIENE AND HEALTH CARE LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Personal Products,Personal Care,ok
+RADICO.NS,RADICO KHAITAN LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Beverages,Breweries & Distilleries,ok
+TATACONSUM.NS,TATA CONSUMER PRODUCTS LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,Tea & Coffee,ok
+UBL.NS,UNITED BREWERIES LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Beverages,Breweries & Distilleries,ok
+UNITDSPR.NS,UNITED SPIRITS LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Beverages,Breweries & Distilleries,ok
+VBL.NS,VARUN BEVERAGES LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Beverages,Other Beverages,ok
+VSTIND.NS,VST INDUSTRIES LIMITED,FMCG,FMCG,match,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Cigarettes & Tobacco Products,Cigarettes & Tobacco Products,ok
+ABBOTINDIA.NS,ABBOTT INDIA LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+AJANTPHARM.NS,AJANTA PHARMA LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+AKUMS.NS,AKUMS DRUGS AND PHARMACEUTICALS,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+ALKEM.NS,ALKEM LABORATORIES LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+APOLLOHOSP.NS,APOLLO HOSPITALS ENTERPRISE LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,Hospital,ok
+ASTERDM.NS,ASTER DM HEALTHCARE LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,Hospital,ok
+ASTRAZEN.NS,ASTRAZENECA PHARMA INDIA LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+AUROPHARMA.NS,AUROBINDO PHARMA LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+BIOCON.NS,BIOCON LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+CAPLIPOINT.NS,CAPLIN POINT LABORATORIES LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+CIPLA.NS,CIPLA LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+CONCORDBIO.NS,CONCORD BIOTECH LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+DIVISLAB.NS,DIVI'S LABORATORIES LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+DRREDDY.NS,DR. REDDY'S LABORATORIES LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+EMCURE.NS,EMCURE PHARMACEUTICALS LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+ERIS.NS,ERIS LIFESCIENCES LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+FORTIS.NS,FORTIS HEALTHCARE LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,Hospital,ok
+GLAND.NS,GLAND PHARMA LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+GLAXO.NS,GLAXOSMITHKLINE PHARMACEUTICALS LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+GLENMARK.NS,GLENMARK PHARMACEUTICALS LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+GRANULES.NS,GRANULES INDIA LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+INDGN.NS,INDEGENE LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,"Healthcare Research, Analytics & Technology",ok
+INDRAMEDCO.NS,INDRAPRASTHA MEDICAL CORPORATION LTD,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,Hospital,ok
+IPCALAB.NS,IPCA LABORATORIES LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+JBCHEPHARM.NS,JB CHEMICALS & PHARMACEUTICALS LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+JUBLPHARMA.NS,JUBILANT PHARMOVA LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+KIMS.NS,KRISHNA INSTITUTE OF MEDICAL SCIENCES LT,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,Hospital,ok
+LALPATHLAB.NS,DR. LAL PATH LABS LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,Healthcare Service Provider,ok
+LAURUSLABS.NS,LAURUS LABS LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+LUPIN.NS,LUPIN LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+MANKIND.NS,MANKIND PHARMA LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+MAXHEALTH.NS,MAX HEALTHCARE INSTITUTE LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,Hospital,ok
+MEDANTA.NS,GLOBAL HEALTH LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,Hospital,ok
+METROPOLIS.NS,METROPOLIS HEALTHCARE LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,Healthcare Service Provider,ok
+NATCOPHARM.NS,NATCO PHARMA LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+NEULANDLAB.NS,NEULAND LABORATORIES LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+NH.NS,NARAYANA HRUDAYALAYA LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,Hospital,ok
+PFIZER.NS,PFIZER LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+POLYMED.NS,POLY MEDICURE LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Equipment & Supplies,Medical Equipment & Supplies,ok
+PPLPHARMA.NS,PIRAMAL PHARMA LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+RAINBOW.NS,RAINBOW CHILDRENS MEDICARE LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,Hospital,ok
+SANOFI.NS,SANOFI INDIA LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+SHILPAMED.NS,SHILPA MEDICARE LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+SPARC.NS,SUN PHARMA ADVANCED RESEARCH COMPANY LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+SUNPHARMA.NS,SUN PHARMACEUTICAL INDUSTRIES LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+SYNGENE.NS,SYNGENE INTERNATIONAL LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,"Healthcare Research, Analytics & Technology",ok
+THYROCARE.NS,THYROCARE TECHNOLOGIES LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,Healthcare Service Provider,ok
+TORNTPHARM.NS,TORRENT PHARMACEUTICALS LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+VIJAYA.NS,VIJAYA DIAGNOSTICS CENTRE LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Healthcare Services,Healthcare Service Provider,ok
+WOCKPHARMA.NS,WOCKHARDT LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+ZYDUSLIFE.NS,ZYDUS LIFESCIENCES LIMITED,HEALTHCARE,HEALTHCARE,match,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,Pharmaceuticals,ok
+ABB.NS,ABB INDIA LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Electrical Equipment,Heavy Electrical Equipment,ok
+ACE.NS,ACTION CONSTRUCTION EQUIPMENT LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,"Agricultural, Commercial & Construction Vehicles",Construction Vehicles,ok
+AIAENG.NS,AIA ENGINEERING LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Castings & Forgings,ok
+ASTRAL.NS,ASTRAL LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Plastic Products - Industrial,ok
+BHEL.NS,BHARAT HEAVY ELECTRICALS LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Electrical Equipment,Heavy Electrical Equipment,ok
+CARBORUNIV.NS,CARBORUNDUM UNIVERSAL LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Abrasives & Bearings,ok
+CGPOWER.NS,CG POWER AND INDUSTRIAL SOLUTIONS LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Electrical Equipment,Heavy Electrical Equipment,ok
+COCHINSHIP.NS,COCHIN SHIPYARD LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Manufacturing,Ship Building & Allied Services,ok
+CUMMINSIND.NS,CUMMINS INDIA LTD,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,"Compressors, Pumps & Diesel Engines",ok
+ELECON.NS,ELECON ENGINEERING COMPANY LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Electrical Equipment,Heavy Electrical Equipment,ok
+ELGIEQUIP.NS,ELGI EQUIPMENTS LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,"Compressors, Pumps & Diesel Engines",ok
+FINCABLES.NS,FINOLEX CABLES LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Cables - Electricals,ok
+FINPIPE.NS,FINOLEX INDUSTRIES LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Plastic Products - Industrial,ok
+GMMPFAUDLR.NS,GMM PFAUDLER LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Manufacturing,Industrial Products,ok
+GRAPHITE.NS,GRAPHITE INDIA LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Electrodes & Refractories,ok
+GRINDWELL.NS,GRINDWELL NORTON LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Abrasives & Bearings,ok
+HONAUT.NS,HONEYWELL AUTOMATION INDIA LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Manufacturing,Industrial Products,ok
+INOXINDIA.NS,INOX INDIA LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Other Industrial Products,ok
+JKPAPER.NS,JK PAPER LIMITED,INDUSTRIAL,INDUSTRIAL,match,Commodities,Forest Materials,"Paper, Forest & Jute Products",Paper & Paper Products,ok
+JYOTICNC.NS,JYOTI CNC AUTOMATION LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Manufacturing,Industrial Products,ok
+KAYNES.NS,KAYNES TECHNOLOGY INDIA LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Manufacturing,Industrial Products,ok
+KEI.NS,KEI INDUSTRIES LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Cables - Electricals,ok
+KIRLOSBROS.NS,KIRLOSKAR BROTHERS LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,"Compressors, Pumps & Diesel Engines",ok
+KIRLOSENG.NS,KIRLOSKAR OIL ENGINES LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,"Compressors, Pumps & Diesel Engines",ok
+KSB.NS,KSB LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,"Compressors, Pumps & Diesel Engines",ok
+POLYCAB.NS,POLYCAB INDIA LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Cables - Electricals,ok
+POLYPLEX.NS,POLYPLEX CORPORATION LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Packaging,ok
+POWERINDIA.NS,ABB POWER PRODUCTS AND SYSTEMS INDIA LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Electrical Equipment,Heavy Electrical Equipment,ok
+PRAJIND.NS,PRAJ INDUSTRIES LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Manufacturing,Industrial Products,ok
+RHIM.NS,RHI MAGNESITA INDIA LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Electrodes & Refractories,ok
+RRKABEL.NS,RR KABEL LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Cables - Electricals,ok
+SIEMENS.NS,SIEMENS LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Electrical Equipment,Heavy Electrical Equipment,ok
+SKFINDIA.NS,SKF INDIA LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Abrasives & Bearings,ok
+SUPREMEIND.NS,SUPREME INDUSTRIES LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Plastic Products - Industrial,ok
+SYRMA.NS,SYRMA SGS TECHNOLOGY LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Manufacturing,Industrial Products,ok
+THERMAX.NS,THERMAX LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Electrical Equipment,Heavy Electrical Equipment,ok
+TIMKEN.NS,TIMKEN INDIA LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Abrasives & Bearings,ok
+TITAGARH.NS,TITAGARH RAIL SYSTEMS LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Manufacturing,Railway Wagons,ok
+TRITURBINE.NS,TRIVENI TURBINE LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Electrical Equipment,Heavy Electrical Equipment,ok
+UFLEX.NS,UFLEX LIMITED,INDUSTRIAL,INDUSTRIAL,match,Industrials,Capital Goods,Industrial Products,Packaging,ok
+AFFLE.NS,AFFLE (INDIA) LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Services,IT Enabled Services,ok
+BSOFT.NS,BIRLASOFT LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+COFORGE.NS,COFORGE LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+CYIENT.NS,CYIENT LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Services,IT Enabled Services,ok
+HAPPSTMNDS.NS,HAPPIEST MINDS TECHNOLOGIES LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+HCLTECH.NS,HCL TECHNOLOGIES LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+INFY.NS,INFOSYS LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+INTELLECT.NS,INTELLECT DESIGN ARENA LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+KPITTECH.NS,KPIT TECHNOLOGIES LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+LATENTVIEW.NS,LATENT VIEW ANALYTICS LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+LTTS.NS,L&T TECHNOLOGY SERVICES LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Services,IT Enabled Services,ok
+MAPMYINDIA.NS,CE INFO SYSTEMS LTD,IT,IT,match,Information Technology,Information Technology,IT - Software,Software Products,ok
+MASTEK.NS,MASTEK LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+MPHASIS.NS,MPHASIS LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+NETWEB.NS,NETWEB TECHNOLOGIES INDIA LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Services,IT Enabled Services,ok
+NEWGEN.NS,NEWGEN SOFTWARE TECHNOLOGIES LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+OFSS.NS,ORACLE FINANCIAL SERVICES SOFTWARE LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Software Products,ok
+PERSISTENT.NS,PERSISTENT SYSTEMS LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+SONATSOFTW.NS,SONATA SOFTWARE LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+TANLA.NS,TANLA PLATFORMS LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Software Products,ok
+TATAELXSI.NS,TATA ELXSI LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+TATATECH.NS,TATA TECHNOLOGIES LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Services,IT Enabled Services,ok
+TCS.NS,TATA CONSULTANCY SERVICES LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+TECHM.NS,TECH MAHINDRA LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+WIPRO.NS,WIPRO LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+ZENSARTECH.NS,ZENSAR TECHNOLOGIES LIMITED,IT,IT,match,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting,ok
+NETWORK18.NS,NETWORK18 MEDIA & INVESTMENTS LIMITED,MEDIA,MEDIA,match,Consumer Discretionary,"Media, Entertainment & Publication",Entertainment,Media & Entertainment,ok
+SAREGAMA.NS,SAREGAMA INDIA LIMITED,MEDIA,MEDIA,match,Consumer Discretionary,"Media, Entertainment & Publication",Entertainment,Media & Entertainment,ok
+SUNTV.NS,SUN TV NETWORK LIMITED,MEDIA,MEDIA,match,Consumer Discretionary,"Media, Entertainment & Publication",Entertainment,TV Broadcasting & Software Production,ok
+TV18BRDCST.NS,TV18 BROADCAST LIMITED,MEDIA,MEDIA,match,Consumer Discretionary,"Media, Entertainment & Publication",Entertainment,TV Broadcasting & Software Production,ok
+ZEEL.NS,ZEE ENTERTAINMENT ENTERPRISES LIMITED,MEDIA,MEDIA,match,Consumer Discretionary,"Media, Entertainment & Publication",Entertainment,TV Broadcasting & Software Production,ok
+ASHAPURMIN.NS,Ashapura Minechem,METALS,METALS,match,Commodities,Metals & Mining,Minerals & Mining,Industrial Minerals,ok
+GMDCLTD.NS,GUJARAT MINERAL DEVELOPMENT CORP,METALS,METALS,match,Commodities,Metals & Mining,Minerals & Mining,Industrial Minerals,ok
+HINDALCO.NS,HINDALCO INDUSTRIES LIMITED,METALS,METALS,match,Commodities,Metals & Mining,Non - Ferrous Metals,Aluminium,ok
+HINDCOPPER.NS,HINDUSTAN COPPER LTD.,METALS,METALS,match,Commodities,Metals & Mining,Non - Ferrous Metals,Copper,ok
+HINDZINC.NS,HINDUSTAN ZINC LIMITED,METALS,METALS,match,Commodities,Metals & Mining,Non - Ferrous Metals,Zinc,ok
+JINDALSTEL.NS,JINDAL STEEL & POWER LIMITED,METALS,METALS,match,Commodities,Metals & Mining,Ferrous Metals,Iron & Steel,ok
+JSL.NS,JINDAL STAINLESS LIMITED,METALS,METALS,match,Commodities,Metals & Mining,Ferrous Metals,Iron & Steel,ok
+JSWSTEEL.NS,JSW STEEL LTD,METALS,METALS,match,Commodities,Metals & Mining,Ferrous Metals,Iron & Steel,ok
+KIOCL.NS,KIOCL LIMITED,METALS,METALS,match,Commodities,Metals & Mining,Ferrous Metals,Sponge Iron,ok
+LLOYDSME.NS,LLOYDS METALS AND ENERGY LIMITED,METALS,METALS,match,Commodities,Metals & Mining,Minerals & Mining,Industrial Minerals,ok
+MOIL.NS,MOIL LIMITED,METALS,METALS,match,Commodities,Metals & Mining,Minerals & Mining,Industrial Minerals,ok
+NATIONALUM.NS,NATIONAL ALUMINIUM COMPANY LIMITED,METALS,METALS,match,Commodities,Metals & Mining,Non - Ferrous Metals,Aluminium,ok
+NMDC.NS,NMDC LIMITED,METALS,METALS,match,Commodities,Metals & Mining,Minerals & Mining,Industrial Minerals,ok
+SAIL.NS,STEEL AUTHORITY OF INDIA LIMITED,METALS,METALS,match,Commodities,Metals & Mining,Ferrous Metals,Iron & Steel,ok
+SARDAEN.NS,SARDA ENERGY & MINERALS LIMITED,METALS,METALS,match,Commodities,Metals & Mining,Ferrous Metals,Iron & Steel,ok
+TATASTEEL.NS,TATA STEEL LIMITED,METALS,METALS,match,Commodities,Metals & Mining,Ferrous Metals,Iron & Steel,ok
+VEDL.NS,VEDANTA LIMITED,METALS,METALS,match,Commodities,Metals & Mining,Diversified Metals,Diversified Metals,ok
+ABREL.NS,ADITYA BIRLA REAL ESTATE LIMITED,REALTY,REALTY,match,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+ANANTRAJ.NS,ANANT RAJ LIMITED,REALTY,REALTY,match,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+BRIGADE.NS,BRIGADE ENTERPRISES LIMITED,REALTY,REALTY,match,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+DLF.NS,DLF LIMITED,REALTY,REALTY,match,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+GODREJPROP.NS,GODREJ PROPERTIES LIMITED,REALTY,REALTY,match,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+LODHA.NS,MACROTECH DEVELOPERS LIMITED,REALTY,REALTY,match,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+MAHLIFE.NS,MAHINDRA LIFESPACE DEVELOPERS LIMITED,REALTY,REALTY,match,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+OBEROIRLTY.NS,OBEROI REALTY LIMITED,REALTY,REALTY,match,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+OMAXE.NS,OMAXE LIMITED,REALTY,REALTY,match,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+PHOENIXLTD.NS,THE PHOENIX MILLS LIMITED,REALTY,REALTY,match,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+PRESTIGE.NS,PRESTIGE ESTATES PROJECTS LIMITED,REALTY,REALTY,match,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+SIGNATURE.NS,SIGNATUREGLOBAL (INDIA) LIMITED,REALTY,REALTY,match,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+SOBHA.NS,SOBHA LIMITED,REALTY,REALTY,match,Consumer Discretionary,Realty,Realty,"Residential, Commercial Projects",ok
+BHARTIARTL.NS,BHARTI AIRTEL LTD,TELECOM,TELECOM,match,Telecommunication,Telecommunication,Telecom - Services,Telecom - Cellular & Fixed line services,ok
+BHARTIHEXA.NS,BHARTI HEXACOM LIMITED,TELECOM,TELECOM,match,Telecommunication,Telecommunication,Telecom - Services,Telecom - Cellular & Fixed line services,ok
+HFCL.NS,HFCL LIMITED,TELECOM,TELECOM,match,Telecommunication,Telecommunication,Telecom - Services,Telecom - Infrastructure,ok
+IDEA.NS,VODAFONE IDEA LTD,TELECOM,TELECOM,match,Telecommunication,Telecommunication,Telecom - Services,Telecom - Cellular & Fixed line services,ok
+INDUSTOWER.NS,INDUS TOWERS LIMITED,TELECOM,TELECOM,match,Telecommunication,Telecommunication,Telecom - Services,Telecom - Infrastructure,ok
+ITI.NS,ITI LIMITED,TELECOM,TELECOM,match,Telecommunication,Telecommunication,Telecom -  Equipment & Accessories,Telecom -  Equipment & Accessories,ok
+STLTECH.NS,STERLITE TECHNOLOGIES LIMITED,TELECOM,TELECOM,match,Telecommunication,Telecommunication,Telecom -  Equipment & Accessories,Telecom -  Equipment & Accessories,ok
+TATACOMM.NS,TATA COMMUNICATIONS LIMITED,TELECOM,TELECOM,match,Telecommunication,Telecommunication,Telecom - Services,Telecom - Cellular & Fixed line services,ok
+TEJASNET.NS,TEJAS NETWORKS LIMITED,TELECOM,TELECOM,match,Telecommunication,Telecommunication,Telecom -  Equipment & Accessories,Telecom -  Equipment & Accessories,ok
+TTML.NS,TATA TELESERVICES MAHARASHTRA,TELECOM,TELECOM,match,Telecommunication,Telecommunication,Telecom - Services,Telecom - Cellular & Fixed line services,ok
+ALOKINDS.NS,ALOK INDUSTRIES LIMITED,TEXTILES,TEXTILES,match,Consumer Discretionary,Textiles,Textiles & Apparels,Other Textile Products,ok
+CENTENKA.NS,CENTURY ENKA LIMITED,TEXTILES,TEXTILES,match,Consumer Discretionary,Textiles,Textiles & Apparels,Other Textile Products,ok
+KPRMILL.NS,KPR MILL LIMITED,TEXTILES,TEXTILES,match,Consumer Discretionary,Textiles,Textiles & Apparels,Other Textile Products,ok
+TRIDENT.NS,TRIDENT LIMITED,TEXTILES,TEXTILES,match,Consumer Discretionary,Textiles,Textiles & Apparels,Other Textile Products,ok
+VTL.NS,VARDHMAN TEXTILES LIMITED,TEXTILES,TEXTILES,match,Consumer Discretionary,Textiles,Textiles & Apparels,Other Textile Products,ok
+WELSPUNLIV.NS,WELSPUN LIVING LIMITED,TEXTILES,TEXTILES,match,Consumer Discretionary,Textiles,Textiles & Apparels,Other Textile Products,ok

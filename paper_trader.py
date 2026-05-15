@@ -107,6 +107,12 @@ UNIVERSAL_BOOK_PCT = 25.0
 UNIVERSAL_BOOK_QTY_PCT = 25
 PARTIAL_QTY_PCT = 33
 
+# Safety net for high-ATR stocks: arm the trailing stop the moment max
+# favorable excursion crosses this threshold, even before a formal
+# R-partial fires. Prevents a trade running to +12% and round-tripping
+# to -1R when partial targets sit at +20%. Does NOT book any profit.
+EARLY_TRAIL_PCT = 10.0
+
 MAX_OPEN_POSITIONS = 8
 MAX_SECTOR_CONC = 0.25
 MAX_NEW_PER_DAY = 3
@@ -554,7 +560,8 @@ def size_position(tier, entry_price, atr):
 
 def _close_trade(sb, tr, exit_price, exit_date, exit_reason,
                  realised_pnl, realised_qty, partials, partials_taken,
-                 current_stop, breakeven_armed, trail_armed):
+                 current_stop, breakeven_armed, trail_armed,
+                 max_unrealized_pct, min_unrealized_pct, trail_armed_reason):
     entry_price = to_float(tr['entry_price'])
     initial_qty = to_int(tr['initial_quantity'])
     initial_stop = to_float(tr['initial_stop'])
@@ -580,6 +587,9 @@ def _close_trade(sb, tr, exit_price, exit_date, exit_reason,
         'current_stop': round(current_stop, 4),
         'breakeven_armed': breakeven_armed,
         'trail_armed': trail_armed,
+        'trail_armed_reason': trail_armed_reason,
+        'max_unrealized_pct': round(max_unrealized_pct, 3) if max_unrealized_pct is not None else None,
+        'min_unrealized_pct': round(min_unrealized_pct, 3) if min_unrealized_pct is not None else None,
         'status': 'closed',
         'updated_at': datetime.utcnow().isoformat(),
     }).eq('id', tr['id']).execute()
@@ -587,7 +597,8 @@ def _close_trade(sb, tr, exit_price, exit_date, exit_reason,
 
 def _update_open_trade(sb, trade_id, current_qty, current_stop, partials_taken,
                        partials, realised_pnl, realised_qty,
-                       breakeven_armed, trail_armed):
+                       breakeven_armed, trail_armed,
+                       max_unrealized_pct, min_unrealized_pct, trail_armed_reason):
     sb.table('paper_trades').update({
         'current_quantity': current_qty,
         'current_stop': round(current_stop, 4),
@@ -597,6 +608,9 @@ def _update_open_trade(sb, trade_id, current_qty, current_stop, partials_taken,
         'realised_qty': realised_qty,
         'breakeven_armed': breakeven_armed,
         'trail_armed': trail_armed,
+        'trail_armed_reason': trail_armed_reason,
+        'max_unrealized_pct': round(max_unrealized_pct, 3) if max_unrealized_pct is not None else None,
+        'min_unrealized_pct': round(min_unrealized_pct, 3) if min_unrealized_pct is not None else None,
         'updated_at': datetime.utcnow().isoformat(),
     }).eq('id', trade_id).execute()
 
@@ -641,7 +655,16 @@ def process_exits(sb, open_trades, today_snap, today_date):
         realised_qty = to_int(tr['realised_qty'], 0)
         breakeven_armed = bool(tr.get('breakeven_armed'))
         trail_armed = bool(tr.get('trail_armed'))
+        trail_armed_reason = tr.get('trail_armed_reason')
         partial_qty = max(1, int(initial_qty * PARTIAL_QTY_PCT / 100))
+
+        # MFE / MAE high-water marks (bar-level granularity).
+        bar_unrealized_high = (bar_high - entry_price) / entry_price * 100
+        bar_unrealized_low  = (bar_low  - entry_price) / entry_price * 100
+        prev_max = to_float(tr.get('max_unrealized_pct'))
+        prev_min = to_float(tr.get('min_unrealized_pct'))
+        max_unrealized_pct = bar_unrealized_high if prev_max is None else max(prev_max, bar_unrealized_high)
+        min_unrealized_pct = bar_unrealized_low  if prev_min is None else min(prev_min, bar_unrealized_low)
 
         # 1. Stop hit first
         if bar_low <= current_stop:
@@ -654,7 +677,8 @@ def process_exits(sb, open_trades, today_snap, today_date):
             _close_trade(sb, tr, current_stop, today_date,
                          'trail_stop' if trail_armed else 'stop',
                          realised_pnl, realised_qty, partials, partials_taken,
-                         current_stop, breakeven_armed, trail_armed)
+                         current_stop, breakeven_armed, trail_armed,
+                         max_unrealized_pct, min_unrealized_pct, trail_armed_reason)
             closed_today += 1
             actions.append({'id': tr['id'], 'ticker': ticker, 'action': 'stop'})
             continue
@@ -687,6 +711,7 @@ def process_exits(sb, open_trades, today_snap, today_date):
                 breakeven_armed = True
             if partials_taken == 2 and not trail_armed:
                 trail_armed = True
+                trail_armed_reason = 'partial_2'
             if current_qty == 0:
                 break
 
@@ -694,10 +719,22 @@ def process_exits(sb, open_trades, today_snap, today_date):
             last_price = partials[-1]['price'] if partials else bar_close
             _close_trade(sb, tr, last_price, today_date, 'partials_full',
                          realised_pnl, realised_qty, partials, partials_taken,
-                         current_stop, breakeven_armed, trail_armed)
+                         current_stop, breakeven_armed, trail_armed,
+                         max_unrealized_pct, min_unrealized_pct, trail_armed_reason)
             closed_today += 1
             actions.append({'id': tr['id'], 'ticker': ticker, 'action': 'partials_full'})
             continue
+
+        # 2b. Early trail-arm via MFE threshold (safety net for high-ATR names).
+        # Fires before formal R-partials when bar_high → +EARLY_TRAIL_PCT and
+        # trail isn't already armed. Locks stop at entry (or higher) and starts
+        # daily trailing — does NOT book profit, so r_multiple stays clean.
+        if not trail_armed and max_unrealized_pct >= EARLY_TRAIL_PCT:
+            trail_armed = True
+            trail_armed_reason = 'pct_threshold'
+            if not breakeven_armed:
+                breakeven_armed = True
+            current_stop = max(current_stop, entry_price)
 
         # 3. Universal 25%/15-day partial (only if no R-partial taken yet)
         entry_date = date.fromisoformat(tr['entry_date'])
@@ -741,7 +778,8 @@ def process_exits(sb, open_trades, today_snap, today_date):
                 current_qty = 0
                 _close_trade(sb, tr, bar_close, today_date, 'time_stop',
                              realised_pnl, realised_qty, partials, partials_taken,
-                             current_stop, breakeven_armed, trail_armed)
+                             current_stop, breakeven_armed, trail_armed,
+                             max_unrealized_pct, min_unrealized_pct, trail_armed_reason)
                 closed_today += 1
                 actions.append({'id': tr['id'], 'ticker': ticker, 'action': 'time_stop'})
                 continue
@@ -750,6 +788,7 @@ def process_exits(sb, open_trades, today_snap, today_date):
         _update_open_trade(
             sb, tr['id'], current_qty, current_stop, partials_taken, partials,
             realised_pnl, realised_qty, breakeven_armed, trail_armed,
+            max_unrealized_pct, min_unrealized_pct, trail_armed_reason,
         )
 
     return actions, closed_today, realised_today
