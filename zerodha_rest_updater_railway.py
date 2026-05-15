@@ -506,6 +506,60 @@ def check_paper_stops():
         return 0
 
 
+def update_paper_excursions():
+    """Update max_unrealized_pct / min_unrealized_pct on open paper trades
+    whenever the live LTP prints a new extreme. Writes only when a value
+    changes, so per-tick cost is minimal (most ticks are no-ops).
+    EOD batch (paper_trader.py) will fold today's bar_high/bar_low into the
+    same columns, so this stays consistent with the EOD source of truth."""
+    try:
+        trades_resp = (supabase.table('paper_trades')
+                         .select('id, ticker, entry_price, '
+                                 'max_unrealized_pct, min_unrealized_pct')
+                         .eq('status', 'open').eq('mode', 'paper').execute())
+        open_trades = trades_resp.data or []
+        if not open_trades:
+            return 0
+
+        tickers = [t['ticker'] for t in open_trades]
+        prices_resp = (supabase.table('live_prices').select('ticker, price')
+                         .in_('ticker', tickers).execute())
+        price_map = {r['ticker']: float(r.get('price') or 0)
+                     for r in (prices_resp.data or [])}
+
+        updates = 0
+        now_iso = datetime.utcnow().isoformat()
+        for tr in open_trades:
+            ltp = price_map.get(tr['ticker'], 0)
+            entry = float(tr.get('entry_price') or 0)
+            if ltp <= 0 or entry <= 0:
+                continue
+            unr_pct = (ltp - entry) / entry * 100
+
+            stored_max = tr.get('max_unrealized_pct')
+            stored_min = tr.get('min_unrealized_pct')
+            stored_max = float(stored_max) if stored_max is not None else None
+            stored_min = float(stored_min) if stored_min is not None else None
+
+            patch = {}
+            if stored_max is None or unr_pct > stored_max:
+                patch['max_unrealized_pct'] = round(unr_pct, 3)
+            if stored_min is None or unr_pct < stored_min:
+                patch['min_unrealized_pct'] = round(unr_pct, 3)
+            if not patch:
+                continue
+            patch['updated_at'] = now_iso
+            try:
+                supabase.table('paper_trades').update(patch).eq('id', tr['id']).execute()
+                updates += 1
+            except Exception as e:
+                print(f"  ⚠️  Excursion update failed for {tr['ticker']}: {e}")
+        return updates
+    except Exception as e:
+        print(f"⚠️  update_paper_excursions error: {e}")
+        return 0
+
+
 def main():
     print("=" * 60)
     print("ZERODHA LIVE PRICE UPDATER - RAILWAY CLOUD VERSION")
@@ -605,6 +659,7 @@ def main():
                 # with the actual D1 entry price + ATR-derived stop.
                 filled = fill_pending_paper_trades() if updated > 0 else 0
                 stopped = check_paper_stops()
+                excursions = update_paper_excursions() if updated > 0 else 0
                 update_count += 1
 
                 now = datetime.now(ist)
@@ -613,6 +668,8 @@ def main():
                     suffix_parts.append(f"filled_paper={filled}")
                 if stopped:
                     suffix_parts.append(f"stopped_paper={stopped}")
+                if excursions:
+                    suffix_parts.append(f"excursions={excursions}")
                 suffix = (", " + ", ".join(suffix_parts)) if suffix_parts else ""
                 if updated > 0:
                     print(f"📈 {now.strftime('%H:%M:%S')} - Updated {updated}/{len(token_to_ticker)} prices (#{update_count}){suffix}")
