@@ -29,8 +29,8 @@ Universal gates (all buckets):
     in stock_fundamentals.quarterly_financials; reject otherwise.
   - Not in real holdings, not in open paper, 21-trading-day cooldown
     after a close.
-  - Position floor Rs 40k, sector concentration <=25%, <=8 open, <=3
-    new entries per day.
+  - Position floor Rs 40k, sector concentration <=25%, <=20 open,
+    committed notional <=95% of sleeve (cash gate), <=3 new entries/day.
   - Kill switches: pause new entries if daily P&L < -2% or DD > -8% ATH.
 
 Execution flow (added 2026-05-13 to remove look-ahead bias):
@@ -113,7 +113,16 @@ PARTIAL_QTY_PCT = 33
 # to -1R when partial targets sit at +20%. Does NOT book any profit.
 EARLY_TRAIL_PCT = 10.0
 
-MAX_OPEN_POSITIONS = 8
+# Position-count cap. With the cash gate below, this is a soft secondary
+# guard against an absurdly fragmented book — capital, not count, is the
+# real limiter now.
+MAX_OPEN_POSITIONS = 20
+# Capital gate: total committed notional (open + pending) may not exceed
+# this fraction of the sleeve. Replaces the old implicit leverage cap that
+# MAX_OPEN_POSITIONS=8 used to provide (8 × ₹3L T1 cap ≈ sleeve). The 5%
+# buffer absorbs D1-open gap-ups when pending rows fill above their D0
+# estimate.
+MAX_DEPLOYED_PCT = 0.95
 MAX_SECTOR_CONC = 0.25
 MAX_NEW_PER_DAY = 3
 DAILY_KILL_PCT = -2.0
@@ -800,12 +809,18 @@ def process_exits(sb, open_trades, today_snap, today_date):
 
 def process_entries(sb, candidates, today_snap, today_date, holdings,
                     recent_closed, open_tickers, sector_map,
-                    sector_exposure, max_new):
+                    sector_exposure, max_new, funnel):
     tier_order = {
         'T1_MULTI_STRONG': 0, 'T2_STRONG_REG': 1,
         'T3_MULTI_REG': 2,    'T4_RS_ACCEL': 3,
     }
     candidates.sort(key=lambda c: (tier_order[c['tier']], -c['signal_score']))
+
+    # Capital gate baseline: committed notional (open + pending) at scan
+    # time = sum of the sector-exposure map (it was built from entry_value
+    # of all committed trades).
+    deployed = sum(sector_exposure.values())
+    cash_cap = SLEEVE * MAX_DEPLOYED_PCT
 
     inserted = []
     for c in candidates:
@@ -828,11 +843,20 @@ def process_entries(sb, candidates, today_snap, today_date, holdings,
         est_entry_price = close_today * (1 + SLIPPAGE_BPS / 10_000)
         qty, notional, _ = size_position(c['tier'], est_entry_price, atr14)
         if qty == 0:
+            funnel['qty_zero_rejected'] = funnel.get('qty_zero_rejected', 0) + 1
+            continue
+
+        # Cash gate: don't commit beyond the deployable sleeve. `continue`
+        # (not break) so a smaller candidate later in the ranked list can
+        # still fit into the remaining headroom.
+        if deployed + notional > cash_cap:
+            funnel['cash_rejected'] = funnel.get('cash_rejected', 0) + 1
             continue
 
         sector = sector_map.get(ticker, 'Unknown')
         sector_notional_after = sector_exposure.get(sector, 0) + notional
         if sector != 'Unknown' and sector_notional_after > MAX_SECTOR_CONC * SLEEVE:
+            funnel['sector_conc_rejected'] = funnel.get('sector_conc_rejected', 0) + 1
             continue
 
         est_initial_stop = est_entry_price - STOP_ATR_MULT * atr14
@@ -862,6 +886,7 @@ def process_entries(sb, candidates, today_snap, today_date, holdings,
         }
         sb.table('paper_trades').insert(row).execute()
         inserted.append(row)
+        deployed += notional
         sector_exposure[sector] = sector_exposure.get(sector, 0) + notional
         open_tickers.add(ticker)
 
@@ -946,6 +971,8 @@ def main():
         'sector_rejected': 0, 'earnings_rejected': 0,
         'in_holdings': 0, 'in_cooldown': 0, 'already_open': 0,
         'qualified': 0, 'inserted': 0,
+        'qty_zero_rejected': 0, 'cash_rejected': 0, 'sector_conc_rejected': 0,
+        'deployed_pct': 0, 'deployed_inr': 0,
         'bucket_counts': {},
         'sector_reasons': {}, 'earnings_reasons': {},
     }
@@ -1088,19 +1115,27 @@ def main():
             inserted = process_entries(
                 sb, candidates, today_snap, today_date, holdings, recent_closed,
                 open_tickers, sector_map, sector_exposure, max_new=slots,
+                funnel=funnel,
             )
             funnel['inserted'] = len(inserted)
             log(f'entries: qualified={len(candidates)} inserted={len(inserted)}')
 
         # 4. Final equity row (load open_trades again after entries)
         final_open = load_open_paper_trades(sb)
+        final_pending = load_pending_paper_trades(sb)
+        deployed_inr = sum(to_float(t.get('entry_value'), 0)
+                           for t in final_open + final_pending)
+        deployed_pct = deployed_inr / SLEEVE * 100 if SLEEVE else 0
+        funnel['deployed_inr'] = round(deployed_inr, 2)
+        funnel['deployed_pct'] = round(deployed_pct, 2)
         total_value, dd_pct = write_equity_row(
             sb, today_date, final_open, today_snap, equity_history,
             cum_realised_closed, opened=len(inserted),
             closed=closed_today, realised_today=realised_today,
         )
         log(f'equity: total={total_value:,.0f} dd={dd_pct:.2f}% '
-            f'open={len(final_open)}')
+            f'open={len(final_open)} pending={len(final_pending)} '
+            f'deployed={deployed_pct:.1f}%')
 
         # 5. Run log
         sb.table('paper_run_log').insert({
@@ -1111,6 +1146,7 @@ def main():
             'exits_processed': len(exit_actions),
             'kill_switch_active': kill,
             'kill_switch_reason': kill_reason,
+            'deployed_pct': round(deployed_pct, 2),
             'funnel': funnel,
             'errors': errors or None,
         }).execute()
