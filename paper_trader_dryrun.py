@@ -6,19 +6,18 @@ Prints the funnel and the candidates that WOULD be inserted today.
 """
 
 import json
-from collections import Counter
 from datetime import date
 
 from supabase import create_client
 
 from paper_trader import (
     SUPABASE_URL, SUPABASE_KEY,
-    MAX_NEW_PER_DAY, MAX_OPEN_POSITIONS, MAX_DEPLOYED_PCT,
+    MAX_NEW_PER_DAY, MAX_OPEN_POSITIONS, MAX_DEPLOYED_PCT, SECTOR_GATE_TOP_N,
     SLEEVE, SLIPPAGE_BPS,
     get_recent_trading_dates, load_snapshots_for_date, load_holdings,
     load_open_paper_trades, load_pending_paper_trades,
     load_recent_closed_tickers, load_sectors,
-    load_sector_quadrants, load_presignals, load_entry_signals,
+    load_sector_rankings, load_presignals, load_entry_signals,
     load_fundamentals,
     group_signals_by_ticker, classify_entry_bucket, classify_presignal_bucket,
     passes_sector_filter, passes_earnings_filter, size_position,
@@ -44,7 +43,7 @@ def main():
     pending_trades = load_pending_paper_trades(sb)
     recent_closed = load_recent_closed_tickers(sb, today_date)
     sector_map = load_sectors(sb)
-    sector_quadrants = load_sector_quadrants(sb)
+    sector_rankings = load_sector_rankings(sb)
     # Committed = open + pending, matching paper_trader.main().
     committed_trades = open_trades + pending_trades
     open_tickers = {t['ticker'] for t in committed_trades}
@@ -55,17 +54,21 @@ def main():
 
     print(f'[DRY] open={len(open_trades)} pending={len(pending_trades)} '
           f'holdings={len(holdings)} cooldown={len(recent_closed)} '
-          f'sectors_quadranted={len(sector_quadrants)}')
+          f'sectors_ranked={len(sector_rankings)}')
     print(f'[DRY] deployed={deployed:,.0f} ({deployed/SLEEVE*100:.1f}% of sleeve)  '
           f'cash_cap={cash_cap:,.0f} ({MAX_DEPLOYED_PCT*100:.0f}%)  '
           f'headroom={headroom:,.0f}')
-    if sector_quadrants:
-        qc = Counter(sector_quadrants.values())
-        print(f'[DRY] sector quadrants today: {dict(qc)}')
-        leading_improving = [s for s, q in sector_quadrants.items()
-                             if q in ('leading', 'improving')]
-        print(f'[DRY] leading/improving sectors ({len(leading_improving)}): '
-              f'{leading_improving}')
+    if sector_rankings:
+        tradeable = sorted(
+            ((r.get('composite_rank'), s) for s, r in sector_rankings.items()
+             if r.get('gate_eligible') and r.get('composite_rank')
+             and r['composite_rank'] <= SECTOR_GATE_TOP_N)
+        )
+        print(f'[DRY] tradeable sectors (top {SECTOR_GATE_TOP_N} eligible by composite):')
+        for rank, s in tradeable:
+            row = sector_rankings[s]
+            print(f'       #{rank}  {s:20s} composite={row.get("composite")}  '
+                  f'breadth={row.get("breadth")}  quadrant={row.get("rrg_quadrant")}')
 
     presignals = load_presignals(sb, signal_date_from, signal_date_to)
     entry_signals_data = load_entry_signals(sb, signal_date_from, signal_date_to)
@@ -130,7 +133,7 @@ def main():
             rejected.append((ticker, c['tier'], 'already_open'))
             continue
         sec_ok, sec_reason = passes_sector_filter(
-            ticker, sector_map, sector_quadrants
+            ticker, sector_map, sector_rankings
         )
         if not sec_ok:
             funnel['sector_rejected'] += 1
@@ -206,11 +209,13 @@ def main():
         else:
             sizing = 'NO_SNAP_OR_ATR'
         sector = sector_map.get(c['ticker'], '?')
-        quadrant = sector_quadrants.get(sector, '?')
+        srow = sector_rankings.get(sector) or {}
+        sec_info = (f"comp={srow.get('composite','?')!s:>5s} "
+                    f"rank={srow.get('composite_rank','-')!s:>3s}")
         flag = ' <-- WOULD INSERT' if c['ticker'] in would_insert else ''
         print(f"  [{c['tier']}] {c['ticker']:18s} score={c['signal_score']:6.1f}  "
-              f"fam={','.join(c['families'])[:35]:35s}  "
-              f"sec={sector[:18]:18s} q={quadrant:9s} {sizing}{flag}")
+              f"fam={','.join(c['families'])[:30]:30s}  "
+              f"sec={sector[:16]:16s} {sec_info} {sizing}{flag}")
 
     print()
     print('=' * 90)

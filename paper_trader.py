@@ -22,8 +22,9 @@ Entry buckets (ranked priority A > B > C > D; signal_score breaks ties):
         Sizing: 0.5% risk, Rs 1.0L cap.
 
 Universal gates (all buckets):
-  - Sector must be in Leading or Improving quadrant (RRG via
-    get_all_sector_rankings RPC).
+  - Sector gate: ticker's sector must be gate_eligible (clears the breadth
+    floor + min stock count) AND rank in the top SECTOR_GATE_TOP_N eligible
+    sectors by composite score (get_all_sector_rankings RPC).
   - Earnings filter: latest quarter YoY positive AND improving for BOTH
     revenue and net profit (latest YoY > prior YoY). Requires >=6 quarters
     in stock_fundamentals.quarterly_financials; reject otherwise.
@@ -161,8 +162,11 @@ RS_ACCEL_OTHER_RULES = (
     'rule_macd', 'rule_pullback_bounce',
 )
 
-# Sector RRG quadrants that pass the universal sector gate
-ALLOWED_SECTOR_QUADRANTS = {'leading', 'improving'}
+# Sector gate: a ticker's sector must be gate_eligible (clears the RPC's
+# breadth floor + min stock count) AND rank in the top N eligible sectors by
+# composite score. Replaces the old leading/improving quadrant gate, which was
+# knife-edged, market-direction-dependent, and ignored sector breadth.
+SECTOR_GATE_TOP_N = 6
 
 # Earnings filter: min quarters in quarterly_financials to evaluate the
 # "YoY positive AND improving" test. Latest YoY = Q[0]/Q[4]; prior YoY =
@@ -326,12 +330,15 @@ def load_cumulative_closed_pnl(sb):
     return sum(to_float(r.get('total_pnl'), 0) for r in (resp.data or []))
 
 
-def load_sector_quadrants(sb):
-    """sector_name -> rrg_quadrant (lowercase). Empty dict on any failure.
+def load_sector_rankings(sb):
+    """sector_name -> full ranking dict from get_all_sector_rankings RPC.
 
-    The RPC `get_all_sector_rankings` returns a JSON object. supabase-py may
-    deliver it as a parsed dict, a JSON-encoded string, or (if the function
-    returns a list) a list directly. Handle all three.
+    Each value carries: composite, composite_rank, gate_eligible, rrg_quadrant,
+    median_rs, rs_slope, rs_level, momentum_rank, breadth, sector_rank,
+    pct_above_ema200, pct_bullish_stack, stock_count.
+
+    The RPC returns a JSON object; supabase-py may deliver it as a parsed dict,
+    a JSON-encoded string, or a list. Handle all three. Empty dict on failure.
     """
     try:
         resp = sb.rpc('get_all_sector_rankings').execute()
@@ -340,11 +347,10 @@ def load_sector_quadrants(sb):
             try:
                 data = json.loads(data)
             except json.JSONDecodeError:
-                log('load_sector_quadrants: data is str but not JSON')
+                log('load_sector_rankings: data is str but not JSON')
                 return {}
-        # RPC payload shape: {'as_of': date, 'total_sectors': N,
-        #   'sectors': { 'IT': {sector, rrg_quadrant, ...}, 'FMCG': {...}, ... } }
-        # Older callers may see a list — accept both.
+        # RPC payload: {'as_of': date, 'total_sectors': N,
+        #   'sectors': {'IT': {...}, 'FMCG': {...}, ...}}
         if isinstance(data, dict):
             sectors_obj = data.get('sectors')
         elif isinstance(data, list):
@@ -364,12 +370,11 @@ def load_sector_quadrants(sb):
             if not isinstance(s, dict):
                 continue
             name = s.get('sector')
-            q = s.get('rrg_quadrant')
-            if name and q:
-                out[name] = str(q).lower()
+            if name:
+                out[name] = s
         return out
     except Exception as e:
-        log(f'load_sector_quadrants failed: {e}')
+        log(f'load_sector_rankings failed: {e}')
         return {}
 
 
@@ -499,15 +504,21 @@ def classify_presignal_bucket(presignal_rows):
 # UNIVERSAL FILTERS
 # ----------------------------------------------------------------------
 
-def passes_sector_filter(ticker, sector_map, sector_quadrants):
+def passes_sector_filter(ticker, sector_map, sector_rankings):
+    """Composite-score sector gate. A sector qualifies if it is gate_eligible
+    (clears the breadth floor + min stock count inside the RPC) AND ranks in
+    the top SECTOR_GATE_TOP_N eligible sectors by composite score."""
     sector = sector_map.get(ticker)
     if not sector:
         return False, 'sector_unknown'
-    q = sector_quadrants.get(sector)
-    if not q:
-        return False, 'sector_quadrant_missing'
-    if q not in ALLOWED_SECTOR_QUADRANTS:
-        return False, f'sector_{q}'
+    row = sector_rankings.get(sector)
+    if not row:
+        return False, 'sector_data_missing'
+    if not row.get('gate_eligible'):
+        return False, 'sector_not_eligible'
+    rank = row.get('composite_rank')
+    if rank is None or rank > SECTOR_GATE_TOP_N:
+        return False, f'sector_rank_{rank}'
     return True, None
 
 
@@ -997,11 +1008,17 @@ def main():
         pending_trades = load_pending_paper_trades(sb)
         recent_closed = load_recent_closed_tickers(sb, today_date)
         sector_map = load_sectors(sb)
-        sector_quadrants = load_sector_quadrants(sb)
+        sector_rankings = load_sector_rankings(sb)
         equity_history = load_recent_equity(sb)
+        tradeable_sectors = sorted(
+            s for s, r in sector_rankings.items()
+            if r.get('gate_eligible') and r.get('composite_rank')
+            and r['composite_rank'] <= SECTOR_GATE_TOP_N
+        )
         log(f'open_trades={len(open_trades)} pending={len(pending_trades)} '
             f'holdings={len(holdings)} cooldown={len(recent_closed)} '
-            f'sectors_quadranted={len(sector_quadrants)}')
+            f'sectors_ranked={len(sector_rankings)} '
+            f'tradeable_sectors={tradeable_sectors}')
 
         # 1. EXITS first using today's bar (operates on 'open' only)
         exit_actions, closed_today, realised_today = process_exits(
@@ -1091,7 +1108,7 @@ def main():
                 if ticker in open_tickers:
                     funnel['already_open'] += 1; continue
                 sec_ok, sec_reason = passes_sector_filter(
-                    ticker, sector_map, sector_quadrants
+                    ticker, sector_map, sector_rankings
                 )
                 if not sec_ok:
                     funnel['sector_rejected'] += 1
