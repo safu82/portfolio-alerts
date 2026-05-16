@@ -815,12 +815,80 @@ def process_exits(sb, open_trades, today_snap, today_date):
 
 
 # ----------------------------------------------------------------------
+# ENTRY CONTEXT (instrumentation — recorded at scan time, never acted on)
+# ----------------------------------------------------------------------
+
+def compute_market_regime(sb, as_of_date):
+    """risk_on / neutral / risk_off from NIFTY 50 close vs its own 50- and
+    200-day SMAs. The index row in daily_stock_snapshots has no EMA columns,
+    so the averages are derived from its close history up to as_of_date."""
+    try:
+        resp = (sb.table('daily_stock_snapshots')
+                  .select('close')
+                  .eq('ticker', 'NIFTY50.NS')
+                  .lte('snapshot_date', as_of_date)
+                  .order('snapshot_date', desc=True)
+                  .limit(200).execute())
+        closes = [to_float(r.get('close')) for r in (resp.data or [])]
+        closes = [c for c in closes if c is not None]
+        if len(closes) < 50:
+            return None
+        close_now = closes[0]
+        sma50 = sum(closes[:50]) / 50
+        if len(closes) < 200:
+            return 'risk_on' if close_now > sma50 else 'risk_off'
+        sma200 = sum(closes) / len(closes)
+        if close_now > sma50 and sma50 > sma200:
+            return 'risk_on'
+        if close_now < sma50 and sma50 < sma200:
+            return 'risk_off'
+        return 'neutral'
+    except Exception as e:
+        log(f'compute_market_regime failed: {e}')
+        return None
+
+
+def compute_entry_context(ticker, today_snap, prior_snap, snap_3d, market_regime):
+    """Snapshot of the entry conditions, frozen at D0 scan time. Pure
+    instrumentation — lets us later slice trade outcomes by how extended /
+    volatile / chased the entry was. See the SAIL discussion (2026-05-15)."""
+    snap = today_snap.get(ticker) or {}
+    close = to_float(snap.get('close'))
+    ema20 = to_float(snap.get('ema_20'))
+    ema50 = to_float(snap.get('ema_50'))
+    atr = to_float(snap.get('atr_14'))
+    high = to_float(snap.get('high'))
+    low = to_float(snap.get('low'))
+
+    ctx = {'entry_market_regime': market_regime}
+    if close and ema20 and ema20 > 0:
+        ctx['entry_dist_ema20_pct'] = round((close - ema20) / ema20 * 100, 3)
+    if close and ema50 and ema50 > 0:
+        ctx['entry_dist_ema50_pct'] = round((close - ema50) / ema50 * 100, 3)
+    if close and atr and close > 0:
+        ctx['entry_atr_pct'] = round(atr / close * 100, 3)
+
+    prev_close = to_float((prior_snap.get(ticker) or {}).get('close'))
+    if close and prev_close and prev_close > 0:
+        ctx['entry_prior_1d_pct'] = round((close - prev_close) / prev_close * 100, 3)
+
+    close_3d = to_float((snap_3d.get(ticker) or {}).get('close'))
+    if close and close_3d and close_3d > 0:
+        ctx['entry_prior_3d_pct'] = round((close - close_3d) / close_3d * 100, 3)
+
+    if high is not None and low is not None and atr and atr > 0:
+        ctx['entry_bar_range_atr'] = round((high - low) / atr, 3)
+    return ctx
+
+
+# ----------------------------------------------------------------------
 # ENTRY PROCESSING
 # ----------------------------------------------------------------------
 
 def process_entries(sb, candidates, today_snap, today_date, holdings,
                     recent_closed, open_tickers, sector_map,
-                    sector_exposure, max_new, funnel):
+                    sector_exposure, max_new, funnel,
+                    prior_snap, snap_3d, market_regime):
     tier_order = {
         'T1_MULTI_STRONG': 0, 'T2_STRONG_REG': 1,
         'T3_MULTI_REG': 2,    'T4_RS_ACCEL': 3,
@@ -895,6 +963,10 @@ def process_entries(sb, candidates, today_snap, today_date, holdings,
             'status': 'pending',
             'mode': 'paper',
         }
+        # Entry-context instrumentation — frozen at scan time, never acted on.
+        row.update(compute_entry_context(
+            ticker, today_snap, prior_snap, snap_3d, market_regime
+        ))
         sb.table('paper_trades').insert(row).execute()
         inserted.append(row)
         deployed += notional
@@ -1003,6 +1075,13 @@ def main():
         log(f'today={today_date}  signal_window={signal_date_from}..{signal_date_to}')
 
         today_snap = load_snapshots_for_date(sb, today_date.isoformat())
+        # Prior-day and ~3-trading-day-back snapshots for entry-context
+        # instrumentation (prior_1d / prior_3d move, etc.).
+        prior_snap = (load_snapshots_for_date(sb, recent_dates[1])
+                      if len(recent_dates) > 1 else {})
+        snap_3d = (load_snapshots_for_date(sb, recent_dates[3])
+                   if len(recent_dates) > 3 else {})
+        market_regime = compute_market_regime(sb, today_date.isoformat())
         holdings = load_holdings(sb)
         open_trades = load_open_paper_trades(sb)
         pending_trades = load_pending_paper_trades(sb)
@@ -1017,7 +1096,7 @@ def main():
         )
         log(f'open_trades={len(open_trades)} pending={len(pending_trades)} '
             f'holdings={len(holdings)} cooldown={len(recent_closed)} '
-            f'sectors_ranked={len(sector_rankings)} '
+            f'sectors_ranked={len(sector_rankings)} regime={market_regime} '
             f'tradeable_sectors={tradeable_sectors}')
 
         # 1. EXITS first using today's bar (operates on 'open' only)
@@ -1133,6 +1212,7 @@ def main():
                 sb, candidates, today_snap, today_date, holdings, recent_closed,
                 open_tickers, sector_map, sector_exposure, max_new=slots,
                 funnel=funnel,
+                prior_snap=prior_snap, snap_3d=snap_3d, market_regime=market_regime,
             )
             funnel['inserted'] = len(inserted)
             log(f'entries: qualified={len(candidates)} inserted={len(inserted)}')
