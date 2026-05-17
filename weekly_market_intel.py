@@ -4,7 +4,9 @@ Weekly Market Intelligence Report Generator
 ============================================
 Pulls 7 days of data from Supabase + Google News, sends to Claude Opus,
 produces both long-form (~1500 words) and short-form (~600 words) reports
-in Markdown and DOCX.
+in Markdown and DOCX. News headlines are first run through a Claude Haiku
+event-extraction pre-pass that digests the raw feed into a categorised
+list of market-moving events (the report's authoritative source for "why").
 
 Schedule: Saturday 03:00 UTC = 08:30 IST (after Friday close,
 after Sat 7 AM Screener fetch).
@@ -42,6 +44,7 @@ SUPABASE_KEY = os.environ['SUPABASE_KEY']
 ANTHROPIC_API_KEY = os.environ['ANTHROPIC_API_KEY']
 
 MODEL = 'claude-opus-4-7'
+HAIKU_MODEL = 'claude-haiku-4-5-20251001'   # news event-extraction pre-pass
 OUT_DIR = 'reports'
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -623,6 +626,18 @@ def fetch_signals_summary():
 # NEWS FETCHER (Google News RSS)
 # =============================================================================
 
+# Catalyst keywords — a headline mentioning any of these names an actual
+# market-moving cause, so it is prioritised over generic "why did the market
+# crash today" clickbait when the feed is trimmed to the context cap.
+CATALYST_KEYWORDS = re.compile(
+    r'\b(duty|tariff|tax|gst|budget|fiscal|excise|subsidy|import|export|'
+    r'petrol|diesel|fuel|crude|oil|brent|rbi|repo|inflation|cpi|gdp|rupee|'
+    r'fed|fii|dii|sebi|austerity|earnings|results|stake|merger|acquisition|'
+    r'policy|sanction|tension|war|deal)\b',
+    re.IGNORECASE,
+)
+
+
 def fetch_google_news():
     queries = [
         '"Nifty 50"',
@@ -631,6 +646,14 @@ def fetch_google_news():
         '"RBI" India',
         '"Indian economy" markets',
         '"IPO" India',
+        # Policy / fiscal / commodity catalysts. The index-focused queries
+        # above surface "the market fell" headlines but rarely the WHY —
+        # duty changes, fuel-price revisions and govt measures. These do.
+        'India "import duty" OR "customs duty" OR tariff',
+        'India petrol diesel price',
+        'India government fiscal OR tax OR GST OR budget',
+        'India gold silver duty OR price',
+        'India "PM Modi" economy OR austerity OR policy',
     ]
     all_items = []
     for q in queries:
@@ -664,7 +687,73 @@ def fetch_google_news():
             continue
         seen.add(key)
         unique.append(item)
-    return unique[:30]
+
+    # Stable sort: headlines naming a concrete catalyst float to the top so
+    # they survive the cap; generic clickbait sinks but is not discarded.
+    unique.sort(key=lambda x: 0 if CATALYST_KEYWORDS.search(x['title']) else 1)
+    return unique[:40]
+
+
+# =============================================================================
+# NEWS EVENT EXTRACTION (Claude Haiku pre-pass)
+# =============================================================================
+
+NEWS_EXTRACT_PROMPT = """You are a financial news analyst. You will receive news headlines about
+Indian markets from the past 7 days. Extract the distinct MARKET-MOVING
+EVENTS behind them.
+
+Rules:
+- Merge every headline about the same underlying event into ONE row.
+- IGNORE pure clickbait that names no catalyst ("Why did the market crash
+  today?", "Sensex crashes 1,300 points", "5 key factors", trading-plan and
+  price-prediction headlines). They carry no information.
+- Pay special attention to DOMESTIC POLICY and FISCAL catalysts: import/export
+  duty or tariff changes, fuel/excise price revisions, tax/GST changes,
+  government austerity or spending measures, regulatory (RBI/SEBI) actions.
+  These are often the real driver of a move and the easiest to miss.
+- For each event provide: a one-line description; a TYPE (exactly one of:
+  Fiscal/Policy, Monetary/RBI, Commodity, Geopolitical, Corporate/Earnings,
+  Global, Other); WHEN (exactly one of: "Occurred this week",
+  "Upcoming (dated)", "Unclear/ongoing"); the AFFECTED sectors or assets; and
+  the likely IMPACT on Indian equities (Bullish / Bearish / Mixed).
+- Do NOT invent events no headline supports. If a single vague headline only
+  hints at something, still include it but end the description with
+  "(single vague headline — unconfirmed)".
+- If the headlines contain no clear market-moving event, output exactly:
+  "No distinct market-moving events identified."
+
+Output ONLY a Markdown table with these columns:
+| Event | Type | When | Affected | Impact |
+No preamble, no commentary before or after the table."""
+
+
+def extract_news_events(news):
+    """Haiku pre-pass: digest raw headlines into a structured event table.
+
+    Returns a Markdown table string, or None if extraction is unavailable
+    (caller falls back to the raw headline list)."""
+    if not news:
+        return None
+    lines = []
+    for i, n in enumerate(news, 1):
+        src = f" ({n['source']})" if n.get('source') else ''
+        lines.append(f"{i}. {n['title']}{src}")
+    headline_block = '\n'.join(lines)
+    try:
+        resp = claude.messages.create(
+            model=HAIKU_MODEL,
+            max_tokens=1500,
+            system=NEWS_EXTRACT_PROMPT,
+            messages=[{
+                'role': 'user',
+                'content': f"Headlines (past 7 days):\n\n{headline_block}",
+            }],
+        )
+        digest = resp.content[0].text.strip()
+        return digest or None
+    except Exception as e:
+        print(f"    ⚠️  News event extraction failed: {e}")
+        return None
 
 
 # =============================================================================
@@ -683,7 +772,7 @@ def fmt_num(v, decimals=2):
     return f"{v:,.{decimals}f}"
 
 
-def build_context(macro, indexes, nifty_emas, sectors, flips, breadth, movers, earnings, signals, news):
+def build_context(macro, indexes, nifty_emas, sectors, flips, breadth, movers, earnings, signals, news, news_digest=None):
     L = []
     today = date.today().strftime('%Y-%m-%d')
     L.append(f"# Weekly Market Context — {today}\n")
@@ -925,10 +1014,24 @@ def build_context(macro, indexes, nifty_emas, sectors, flips, breadth, movers, e
         L.append("_No entry signals fired in the last 7 days._")
     L.append("")
 
-    # News
-    L.append("## News Headlines (last 7 days, deduped)\n")
+    # Market-moving events digest (Haiku pre-pass over the raw headlines)
+    L.append("## Market-Moving Events This Week (categorised from news headlines)\n")
+    if news_digest:
+        L.append("_A news-analysis pass grouped this week's headlines into distinct "
+                 "events. This is the PRIMARY source for WHY the market moved — "
+                 "especially domestic policy / fiscal catalysts. The data tables "
+                 "above are the source for the numbers; this section is the source "
+                 "for the cause._\n")
+        L.append(news_digest)
+    else:
+        L.append("_Event extraction unavailable this run — rely on the raw "
+                 "headlines below for cause / narrative._")
+    L.append("")
+
+    # News (raw headlines — kept for transparency and as a fallback)
+    L.append("## News Headlines (last 7 days, deduped — raw feed)\n")
     if news:
-        for n in news[:25]:
+        for n in news[:30]:
             src = f" — _{n['source']}_" if n.get('source') else ''
             L.append(f"- {n['title']}{src}")
     else:
@@ -982,15 +1085,37 @@ explanation in parentheses. Examples:
   The signals table provides this-week vs prior-week unique counts and the
   delta. Frame the conversation as "the Blue Zone universe expanded from N to M
   unique stocks this week" — NOT "M signals were fired."
-- News headlines may mention days/values inaccurately — cross-check against
-  the index-closes table before quoting.
+- TWO separate rules govern the news data — do not conflate them:
+  (a) FACTS: a headline may state a date, index level, or % inaccurately.
+      NEVER take a date, price, EMA or percentage from a headline or from the
+      events digest — those come ONLY from the data tables above.
+  (b) CAUSE: the "Market-Moving Events This Week" section (and the raw
+      headlines beneath it) ARE your primary, authoritative source for WHY
+      the market moved. The data tables tell you WHAT moved; the news tells
+      you WHY. Use it actively — never leave the "why" of a move vague.
+- When explaining why an index or sector moved, consult the "Market-Moving
+  Events" digest FIRST. Domestic policy and fiscal catalysts — import/export
+  duty or tariff changes, fuel/excise price revisions, tax/GST changes,
+  government austerity or spending measures, RBI/SEBI actions — are frequently
+  the real driver and are easy to under-weight. Do NOT default to the largest
+  quantified macro number (e.g. a Brent crude move) as the explanation when a
+  policy event in the digest is a more direct cause.
+- DIVERGENCE TELL: when a domestic sector or ETF moves OPPOSITE to its global
+  counterpart — e.g. Indian gold/silver ETFs rising while global gold (USD)
+  falls — that divergence almost always signals a DOMESTIC policy or tax cause
+  (an import-duty hike lifts the rupee landed price regardless of the global
+  price). Find the cause in the events digest and name it explicitly — do not
+  label it a generic "safe-haven bid".
 - If a data point isn't in the context, DON'T invent it.
 
 # Structure (~1400-1800 words, 9 sections)
 
 ## 1. What Happened This Week
 3-4 sentences. Headline week % move (use the index-closes table) + the dominant
-theme (rotation, breadth shift, macro event, single-stock blowup, etc.)
+theme (rotation, breadth shift, macro event, single-stock blowup, etc.) AND the
+dominant CAUSE — name the specific catalyst(s) from the "Market-Moving Events"
+digest that drove the week. If a domestic policy or fiscal event is in the
+digest, it almost certainly belongs in this opening paragraph.
 
 ## 2. The Trend Picture
 Nifty's position vs its 20 / 50 / 200-day EMAs (Exponential Moving Average —
@@ -1004,8 +1129,11 @@ strongest A/D split.
 
 ## 3. Sector Rotation — Where Money Is Flowing
 Top 3 / bottom 3 sectors by weekly return. Highlight any quadrant flips
-(Leading <-> Weakening, etc.). Link to macro events ("Brent fell 8% — auto
-parts and aviation predictably rose").
+(Leading <-> Weakening, etc.). Link each notable sector move to a cause from
+the "Market-Moving Events" digest or the macro data — e.g. "Brent fell 8%, so
+auto parts and aviation rose" or "the gold/silver import-duty hike lifted ETF
+prices". Apply the divergence tell: a domestic ETF/sector moving against its
+global counterpart points to a policy cause, not a flow-of-funds story.
 
 ## 4. Earnings Pulse
 The earnings section is filtered to ONE specific quarter — state which
@@ -1082,8 +1210,12 @@ ripping the same day is not coincidence"). One sentence each.
 
 ## 7. Macro & Global
 Brent / USDINR / DXY / Gold / VIX week-over-week moves (from Macro Snapshot
-section, which is fine for these). Brief US / global context. Any major macro
-news (RBI decision, GDP print, geopolitics) from the news feed.
+section, which is fine for these). Brief US / global context. Then cover the
+domestic macro and policy events from the "Market-Moving Events" digest —
+RBI/SEBI actions, fiscal measures, duty/tax/fuel-price changes, government
+announcements — and their market impact. This section MUST reflect every
+Fiscal/Policy and Monetary/RBI event in the digest marked as occurring this
+week; do not omit one because it lacks a tidy quantified figure.
 
 ## 8. What to Watch Next Week
 ONLY mention items that are clearly, verifiably in the FUTURE. The LLM has
@@ -1096,9 +1228,11 @@ for upcoming events. Apply this rule strictly:
   results (e.g., "Reliance to report Q4 results next Wednesday"). If no such
   headlines exist in the feed, skip this bullet entirely. Do NOT make up a
   generic "watch earnings next week" line.
-- **Macro events**: ONLY if headlines explicitly mention an upcoming RBI
-  meeting, GDP / CPI print, Fed decision, etc. with future dates. Avoid
-  vague "watch for any new RBI signal" — not actionable.
+- **Macro events**: ONLY if a headline, or a "Market-Moving Events" digest row
+  whose When column reads "Upcoming (dated)", explicitly flags a future RBI
+  meeting, GDP / CPI print, Fed decision, etc. Digest rows marked "Occurred
+  this week" are PAST — never list them here. Avoid vague "watch for any new
+  RBI signal" — not actionable.
 - **Political / geopolitical events**: BE EXTRA CAREFUL. State election
   results, budget announcements, treaty signings often LOOK upcoming in
   headlines but have actually already happened. If a headline says
@@ -1127,7 +1261,7 @@ Include honest caveats.
 - Length: 1400-1700 words. Quality over length.
 
 # Input
-You'll receive a structured context block with: macro snapshot, sector summary, breadth, top movers, earnings season + notable prints, signals fired this week, news headlines.
+You'll receive a structured context block with: macro snapshot, sector summary, breadth, top movers, earnings season + notable prints, signals fired this week, a categorised "Market-Moving Events" digest, and the raw news headlines.
 
 Output: pure Markdown. Use ## for section headers, **bold** for emphasis on numbers, tables (| a | b |) where they make data scan easier. No frontmatter, no signoff.
 """
@@ -1158,7 +1292,12 @@ Single sentence: Nifty's % move + the dominant theme.
 3 worst-performing sectors. Same format.
 
 ## Notable Events
-2-3 things that moved the market this week (earnings beats/misses, macro, geopolitics, RBI). One short paragraph each.
+2-3 things that moved the market this week. Use the "Market-Moving Events"
+digest in the context as your source for the WHY — especially domestic policy
+and fiscal catalysts (duty/tax changes, fuel-price revisions, government
+measures), which matter as much as earnings and global macro. One short
+paragraph each, in plain English. Never take a date or price from a headline —
+only the cause.
 
 ## Charts to Know
 1-2 visualizations described in words (no images). Example: "The advance/decline line — which counts how many stocks rose vs fell each day — kept climbing all week. That's a sign more stocks are participating in the rally, not just a few large names."
@@ -1175,7 +1314,13 @@ Single sentence: Nifty's % move + the dominant theme.
 - Avoid jargon without explanation.
 
 # Input
-Same context block as the long-form report. Be selective.
+Same context block as the long-form report — including a categorised
+"Market-Moving Events" digest. Be selective. The digest is your authoritative
+source for WHY sectors and the index moved; the data tables are the source for
+the numbers. If a domestic policy / fiscal event is in the digest, it belongs
+in this report. When a domestic ETF or sector moves opposite to its global
+counterpart (e.g. Indian gold ETFs up while global gold falls), that points to
+a domestic policy/tax cause — name it, don't call it a "safe-haven" move.
 
 Output: pure Markdown. ## for section headers, **bold** for emphasis. No tables (keep it linear). No frontmatter, no signoff.
 """
@@ -1348,8 +1493,12 @@ def main():
     news = fetch_google_news()
     print(f"  Got {len(news)} unique headlines")
 
+    print("\n🧠 Extracting market-moving events (Claude Haiku)...")
+    news_digest = extract_news_events(news)
+    print(f"  {'Event digest built' if news_digest else 'No digest — falling back to raw headlines'}")
+
     print("\n🧱 Building context block...")
-    context = build_context(macro, indexes, nifty_emas, sectors, flips, breadth, movers, earnings, signals, news)
+    context = build_context(macro, indexes, nifty_emas, sectors, flips, breadth, movers, earnings, signals, news, news_digest)
     os.makedirs(OUT_DIR, exist_ok=True)
     today_str = date.today().strftime('%Y-%m-%d')
     ctx_path = f'{OUT_DIR}/_context_{today_str}.md'
