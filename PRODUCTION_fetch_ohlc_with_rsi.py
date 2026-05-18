@@ -332,6 +332,56 @@ def save_nifty50_to_supabase(kite: KiteConnect, supabase: Client):
         print(f"  ⚠️  Error saving NIFTY 50: {e}")
 
 
+def find_index_token(kite: KiteConnect, index_name: str):
+    """Locate an NSE index instrument token by name (e.g. 'NIFTY 500').
+    Indices live in the INDICES segment and are NOT matched by the EQ-only
+    get_instrument_token lookup, so they need this dedicated search."""
+    if not hasattr(get_instrument_token, 'instruments'):
+        print("📥 Downloading instruments from Zerodha...")
+        get_instrument_token.instruments = kite.instruments("NSE") + kite.instruments("BSE")
+        print(f"✅ Loaded {len(get_instrument_token.instruments)} instruments")
+    target = index_name.strip().upper()
+    for inst in get_instrument_token.instruments:
+        if (inst.get('segment') == 'INDICES'
+                and (inst.get('name', '').strip().upper() == target
+                     or inst.get('tradingsymbol', '').strip().upper() == target)):
+            return inst['instrument_token']
+    return None
+
+
+def save_benchmark_to_supabase(kite: KiteConnect, supabase: Client,
+                               db_ticker: str, instrument_token: int):
+    """OHLC-only writer for a benchmark instrument (index or ETF).
+
+    Deliberately bypasses fetch_and_calculate_ohlc so the row carries no
+    alkalyme_rs / rs_rank and never enters the RS-ranker or scanner universes
+    — the same treatment NIFTY50.NS already gets. The paper algo only needs
+    the daily close."""
+    try:
+        to_date   = datetime.now()
+        from_date = to_date - timedelta(days=DAYS_HISTORY)
+        data      = kite.historical_data(
+            instrument_token=instrument_token,
+            from_date=from_date, to_date=to_date, interval='day'
+        )
+        records = [{
+            'ticker': db_ticker,
+            'snapshot_date': row['date'].strftime('%Y-%m-%d')
+                if hasattr(row['date'], 'strftime') else str(row['date'])[:10],
+            'open': float(row['open']), 'high': float(row['high']),
+            'low':  float(row['low']),  'close': float(row['close']),
+            'volume': int(row.get('volume', 0)),
+        } for row in data]
+        if records:
+            supabase.table('daily_stock_snapshots').upsert(records, on_conflict='ticker,snapshot_date').execute()
+            supabase.table('historical_snapshots').upsert(records, on_conflict='ticker,snapshot_date').execute()
+            print(f"  ✅ {db_ticker}: {len(records)} records saved")
+        else:
+            print(f"  ⚠️  {db_ticker}: no data returned")
+    except Exception as e:
+        print(f"  ⚠️  Error saving {db_ticker}: {e}")
+
+
 def get_instrument_token(kite: KiteConnect, yahoo_ticker: str) -> tuple:
     if yahoo_ticker.endswith('.NS'):
         exchange, symbol = 'NSE', yahoo_ticker.replace('.NS', '')
@@ -533,6 +583,23 @@ def main():
             failed += 1
             print(f"  ⚠️  {ticker}: no data returned")
         time.sleep(RATE_LIMIT_DELAY)
+
+    # ── Paper-algo benchmarks (OHLC-only — never enter RS / scanner universes) ──
+    print("\n📊 Fetching paper-algo benchmarks...")
+    n500_token = find_index_token(kite, 'NIFTY 500')
+    if n500_token:
+        print(f"  NIFTY 500 index token: {n500_token}")
+        save_benchmark_to_supabase(kite, supabase, 'NIFTY500.NS', n500_token)
+    else:
+        print("  ⚠️  NIFTY 500 index not found in instrument dump — skipped")
+    time.sleep(RATE_LIMIT_DELAY)
+
+    mom_token, _ = get_instrument_token(kite, 'MOMENTUM50.NS')
+    if mom_token:
+        save_benchmark_to_supabase(kite, supabase, 'MOMENTUM50.NS', mom_token)
+    else:
+        print("  ⚠️  MOMENTUM50 ETF not found in instrument dump — skipped")
+    time.sleep(RATE_LIMIT_DELAY)
 
     cleanup_old_data(supabase, days_to_keep=60)
     print(f"\n✅ {successful} ok | ❌ {failed} failed | 💾 {total_records:,} records")

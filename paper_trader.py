@@ -1017,6 +1017,30 @@ def kill_switch(equity_history, provisional_total):
     return False, None
 
 
+def fetch_benchmark_closes(sb, today_date):
+    """Latest NIFTY 500 index + Nifty-500 Momentum-50 ETF close on or before
+    today, read from daily_stock_snapshots (written by the 16:30 IST Zerodha
+    OHLC job, which runs ~5.5h before this algo). Falls back to the most
+    recent prior close if today's row is missing — so the equity curve never
+    gets a gap. Returns (bench_n500, bench_mom50); either may be None."""
+    out = {'NIFTY500.NS': None, 'MOMENTUM50.NS': None}
+    for tk in out:
+        try:
+            r = (sb.table('daily_stock_snapshots')
+                 .select('close')
+                 .eq('ticker', tk)
+                 .lte('snapshot_date', today_date.isoformat())
+                 .order('snapshot_date', desc=True)
+                 .limit(1).execute())
+            if r.data and r.data[0].get('close') is not None:
+                out[tk] = round(float(r.data[0]['close']), 2)
+            else:
+                print(f'  ⚠️  no benchmark close found for {tk}')
+        except Exception as e:
+            print(f'  ⚠️  benchmark fetch failed for {tk}: {e}')
+    return out['NIFTY500.NS'], out['MOMENTUM50.NS']
+
+
 def write_equity_row(sb, today_date, open_trades, today_snap, equity_history,
                      cum_realised_closed, opened, closed, realised_today):
     pv = positions_mtm(open_trades, today_snap)
@@ -1027,6 +1051,7 @@ def write_equity_row(sb, today_date, open_trades, today_snap, equity_history,
         + [total_value]
     )
     dd_pct = (total_value - ath) / ath * 100 if ath else 0
+    bench_n500, bench_mom50 = fetch_benchmark_closes(sb, today_date)
 
     sb.table('paper_equity').upsert({
         'snapshot_date': today_date.isoformat(),
@@ -1038,6 +1063,8 @@ def write_equity_row(sb, today_date, open_trades, today_snap, equity_history,
         'trades_opened_today': opened,
         'trades_closed_today': closed,
         'realised_today': round(realised_today, 2),
+        'bench_n500': bench_n500,
+        'bench_mom50': bench_mom50,
     }, on_conflict='snapshot_date').execute()
     return total_value, dd_pct
 
