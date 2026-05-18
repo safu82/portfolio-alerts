@@ -2,8 +2,8 @@ name: Fetch YFinance Metrics (ATH + Beta + Returns)
 
 on:
   schedule:
-    - cron: '0 13 * * 1-5'   # 6:30 PM IST (13:00 UTC), Mon-Fri
-                               # Runs after OHLC (5:30 PM) and scanner (6:00 PM)
+    - cron: '9 13 * * 1-5'   # 6:39 PM IST (13:09 UTC), Mon-Fri — off-hour to avoid cron delay
+                               # Runs after OHLC and scanner
   workflow_dispatch:           # Manual trigger anytime
 
 jobs:

@@ -1,7 +1,7 @@
 name: Scan Entry Signals
 on:
   schedule:
-   - cron: '0 14 * * *'  # 7:30 PM IST (14:00 UTC)
+   - cron: '13 14 * * *'  # 7:43 PM IST (14:13 UTC) — off-hour to avoid cron delay
   workflow_dispatch:  # Allow manual trigger
 jobs:
   scan-signals:
