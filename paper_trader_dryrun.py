@@ -2,7 +2,9 @@
 """
 Dry-run for paper_trader strategy v3 entry pipeline.
 Reads only — no writes to paper_trades, paper_equity, or paper_run_log.
-Prints the funnel and the candidates that WOULD be inserted today.
+Mirrors paper_trader.main() entry logic field-for-field: kill switch →
+bucket → universal gates → tier-rank → slot cap → cash gate → per-sector
+concentration cap. Prints the funnel and the candidates that WOULD insert.
 """
 
 import json
@@ -13,14 +15,15 @@ from supabase import create_client
 from paper_trader import (
     SUPABASE_URL, SUPABASE_KEY,
     MAX_NEW_PER_DAY, MAX_OPEN_POSITIONS, MAX_DEPLOYED_PCT, SECTOR_GATE_TOP_N,
-    SLEEVE, SLIPPAGE_BPS,
+    MAX_SECTOR_CONC, SLEEVE, SLIPPAGE_BPS,
     get_recent_trading_dates, load_snapshots_for_date, load_holdings,
     load_open_paper_trades, load_pending_paper_trades,
     load_recent_closed_tickers, load_sectors,
     load_sector_rankings, load_presignals, load_entry_signals,
-    load_fundamentals,
+    load_fundamentals, load_recent_equity, load_cumulative_closed_pnl,
     group_signals_by_ticker, classify_entry_bucket, classify_presignal_bucket,
     passes_sector_filter, passes_earnings_filter, size_position,
+    positions_mtm, open_capital_tied, kill_switch,
     to_float,
 )
 
@@ -58,6 +61,23 @@ def main():
     print(f'[DRY] deployed={deployed:,.0f} ({deployed/SLEEVE*100:.1f}% of sleeve)  '
           f'cash_cap={cash_cap:,.0f} ({MAX_DEPLOYED_PCT*100:.0f}%)  '
           f'headroom={headroom:,.0f}')
+
+    # Sector-exposure baseline (open + pending) — matches process_entries.
+    sector_exposure = {}
+    for t in committed_trades:
+        sec = t.get('sector') or 'Unknown'
+        sector_exposure[sec] = sector_exposure.get(sec, 0) + to_float(t.get('entry_value'), 0)
+
+    # Kill switch — the same gate paper_trader.main() runs before new entries.
+    equity_history = load_recent_equity(sb)
+    cum_realised_closed = load_cumulative_closed_pnl(sb)
+    pv_now = positions_mtm(open_trades, today_snap)
+    provisional_total = (
+        SLEEVE - open_capital_tied(open_trades) + cum_realised_closed + pv_now
+    )
+    kill, kill_reason = kill_switch(equity_history, provisional_total)
+    print(f'[DRY] kill_switch={("ACTIVE: " + kill_reason) if kill else "inactive"}')
+
     if sector_rankings:
         tradeable = sorted(
             ((r.get('composite_rank'), s) for s, r in sector_rankings.items()
@@ -161,13 +181,17 @@ def main():
         'T3_MULTI_REG': 2, 'T4_RS_ACCEL': 3,
     }
     candidates.sort(key=lambda c: (tier_order[c['tier']], -c['signal_score']))
-    slots = max(0, min(MAX_NEW_PER_DAY, MAX_OPEN_POSITIONS - len(committed_trades)))
+    slots = 0 if kill else max(
+        0, min(MAX_NEW_PER_DAY, MAX_OPEN_POSITIONS - len(committed_trades))
+    )
 
-    # Simulate insertion: walk ranked candidates applying the slot count AND
-    # the cash gate (notional sized off D0 close, matching process_entries).
-    # Sector-concentration is not modelled here — see header note.
+    # Simulate insertion: walk ranked candidates applying the slot count, the
+    # cash gate AND the per-sector concentration cap — mirrors process_entries
+    # field-for-field (notional sized off D0 close).
     sim_deployed = deployed
+    sim_sector_exp = dict(sector_exposure)
     would_insert = set()
+    sim_skips = {'cash': 0, 'sector_conc': 0}
     for c in candidates:
         if len(would_insert) >= slots:
             break
@@ -181,8 +205,15 @@ def main():
         if qty == 0:
             continue
         if sim_deployed + notional > cash_cap:
+            sim_skips['cash'] += 1
+            continue
+        sector = sector_map.get(c['ticker'], 'Unknown')
+        if (sector != 'Unknown'
+                and sim_sector_exp.get(sector, 0) + notional > MAX_SECTOR_CONC * SLEEVE):
+            sim_skips['sector_conc'] += 1
             continue
         sim_deployed += notional
+        sim_sector_exp[sector] = sim_sector_exp.get(sector, 0) + notional
         would_insert.add(c['ticker'])
 
     print()
@@ -194,7 +225,8 @@ def main():
     print()
     print('=' * 90)
     print(f'QUALIFIED CANDIDATES ({len(would_insert)} would insert — slots={slots}, '
-          f'cash gate applied, sector-conc NOT modelled)')
+          f'cash + sector-conc gates applied; '
+          f'sim skips: cash={sim_skips["cash"]} sector_conc={sim_skips["sector_conc"]})')
     print('=' * 90)
     if not candidates:
         print('  <none>')
