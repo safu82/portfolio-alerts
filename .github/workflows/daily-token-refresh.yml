@@ -60,3 +60,28 @@ jobs:
           echo "❌ Token refresh failed!"
           echo "Please check the logs above and run manually if needed"
           echo "Manual command: python zerodha_auto_token_with_supabase.py"
+
+  notify:
+    name: Telegram notification
+    runs-on: ubuntu-latest
+    needs: refresh-token
+    if: always()
+    steps:
+      - name: Send Telegram message
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STATUS: ${{ needs.refresh-token.result }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$STATUS" = "success" ]; then
+            EMOJI="✅"; TITLE="Zerodha token refresh OK"
+          else
+            EMOJI="❌"; TITLE="Zerodha token refresh FAILED"
+          fi
+          printf -v MSG '%s <b>%s</b>\nstatus: %s\n\n<a href="%s">view run</a>' "$EMOJI" "$TITLE" "$STATUS" "$RUN_URL"
+          curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TG_CHAT}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "text=${MSG}" \
+            --data-urlencode "disable_web_page_preview=true"

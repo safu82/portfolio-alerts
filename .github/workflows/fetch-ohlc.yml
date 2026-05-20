@@ -53,3 +53,29 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+  notify:
+    name: Telegram notification
+    runs-on: ubuntu-latest
+    needs: [fetch-ohlc, rank-rs]
+    if: always()
+    steps:
+      - name: Send Telegram message
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OHLC_STATUS: ${{ needs.fetch-ohlc.result }}
+          RANK_STATUS: ${{ needs.rank-rs.result }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$OHLC_STATUS" = "success" ] && [ "$RANK_STATUS" = "success" ]; then
+            EMOJI="✅"; TITLE="OHLC fetch OK"
+          else
+            EMOJI="❌"; TITLE="OHLC fetch FAILED"
+          fi
+          printf -v MSG '%s <b>%s</b>\nfetch-ohlc: %s\nrank-rs: %s\n\n<a href="%s">view run</a>' "$EMOJI" "$TITLE" "$OHLC_STATUS" "$RANK_STATUS" "$RUN_URL"
+          curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TG_CHAT}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "text=${MSG}" \
+            --data-urlencode "disable_web_page_preview=true"
