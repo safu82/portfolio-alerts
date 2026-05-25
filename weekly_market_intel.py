@@ -546,6 +546,37 @@ def fetch_earnings_season():
     }
 
 
+def fetch_recent_declared_earnings(days=10):
+    """Tickers with `declared = true` earnings in the last N days. The ONLY
+    universe where 'this week's earnings story' framing applies in the
+    report — gates Opus's Section 4 bellwether commentary so stale prints
+    (filed weeks ago) aren't framed as current-week earnings news.
+
+    NOTE: `earnings_calendar` is populated by `integrated_alert_scanner.py`
+    for the user's PORTFOLIO only. So this list will rarely contain
+    large-cap bellwethers (which are mostly non-portfolio). That's the
+    point — the absence forces the prompt down the conservative branch
+    (separate price action from old earnings)."""
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    try:
+        resp = (supabase.table('earnings_calendar')
+                .select('ticker, earnings_date, declared')
+                .gte('earnings_date', cutoff)
+                .eq('declared', True)
+                .execute())
+        rows = resp.data or []
+        # Dedupe by ticker, keep latest earnings_date.
+        latest = {}
+        for r in rows:
+            t, d = r['ticker'], r['earnings_date']
+            if t not in latest or d > latest[t]:
+                latest[t] = d
+        return sorted(latest.items(), key=lambda kv: kv[1], reverse=True)
+    except Exception as e:
+        print(f"  ⚠️  recent declared earnings fetch failed: {e}")
+        return []
+
+
 def fetch_signals_summary():
     """Entry signals fired in last 14 days, split into this-week vs last-week.
     Counts UNIQUE TICKERS per indicator (not signal-rows — a stock firing the
@@ -654,6 +685,14 @@ def fetch_google_news():
         'India government fiscal OR tax OR GST OR budget',
         'India gold silver duty OR price',
         'India "PM Modi" economy OR austerity OR policy',
+        # Geopolitical / global commodity catalysts — these often drive
+        # Brent / DXY / risk appetite which then hit Indian equities. The
+        # India-focused queries above rarely surface a US-Iran ceasefire or
+        # Middle East de-escalation directly even when it's the week's
+        # biggest oil-price driver.
+        '"US Iran" OR "Iran Israel" ceasefire OR talks OR "de-escalation"',
+        '"Middle East" ceasefire OR diplomatic OR sanctions',
+        '"crude oil" OR Brent ceasefire OR sanctions OR supply OR OPEC',
     ]
     all_items = []
     for q in queries:
@@ -698,28 +737,49 @@ def fetch_google_news():
 # NEWS EVENT EXTRACTION (Claude Haiku pre-pass)
 # =============================================================================
 
-NEWS_EXTRACT_PROMPT = """You are a financial news analyst. You will receive news headlines about
-Indian markets from the past 7 days. Extract the distinct MARKET-MOVING
-EVENTS behind them.
+NEWS_EXTRACT_PROMPT = """You are a financial news analyst. You will receive:
+1. (Optional) Last week's market intelligence report — for novelty context.
+2. News headlines about Indian markets from the past 7 days.
+
+Your job: extract the distinct MARKET-MOVING EVENTS in the current week's
+headlines, classified by NOVELTY relative to last week's report.
 
 Rules:
 - Merge every headline about the same underlying event into ONE row.
 - IGNORE pure clickbait that names no catalyst ("Why did the market crash
   today?", "Sensex crashes 1,300 points", "5 key factors", trading-plan and
   price-prediction headlines). They carry no information.
-- Pay special attention to DOMESTIC POLICY and FISCAL catalysts: import/export
-  duty or tariff changes, fuel/excise price revisions, tax/GST changes,
-  government austerity or spending measures, regulatory (RBI/SEBI) actions.
-  These are often the real driver of a move and the easiest to miss.
-- For each event provide: a one-line description; a TYPE (exactly one of:
-  Fiscal/Policy, Monetary/RBI, Commodity, Geopolitical, Corporate/Earnings,
-  Global, Other); WHEN (exactly one of: "Occurred this week",
-  "Upcoming (dated)", "Unclear/ongoing"); the AFFECTED sectors or assets; and
-  the likely IMPACT on Indian equities (Bullish / Bearish / Mixed).
+- **NOVELTY tagging — this is the critical column.** For each event, set
+  WHEN to exactly one of:
+  * **"New this week"** — the event itself happened or was announced THIS
+    week and was NOT materially covered in last week's report. (If no prior
+    report is provided, default to this for events that occurred this week.)
+  * **"Continuing from prior week"** — last week's report already covered
+    the underlying event materially. This week's headlines are follow-up
+    coverage, analysis, brokerage commentary, or secondary impacts. Include
+    ONLY if there is a genuinely material new development this week (e.g.,
+    a duty raised further, a deadline announced, a reversal) — NOT just
+    re-coverage of the same event.
+  * **"Upcoming (dated)"** — explicitly future event with a specific date
+    in the headlines (e.g., "RBI to hold rate decision on June 5").
+  * **"Unclear/ongoing"** — long-running situation with no specific catalyst
+    date this week.
+- A headline that's pure analysis/commentary on an old event (e.g., "World
+  Gold Council weekly monitor — duty update", "Brokerage X believes duty
+  hike will hurt Y") is NOT a new event. Tag Continuing only if there's
+  genuinely new factual development; otherwise OMIT it entirely. Do not
+  pad the digest with rehashed prior-week stories.
+- Pay special attention to DOMESTIC POLICY catalysts (duty/tariff/tax/GST/
+  fuel/excise/regulatory) AND GEOPOLITICAL catalysts (US-Iran, Middle East,
+  ceasefires, sanctions, OPEC). These are often the real driver and are
+  the easiest categories to under-weight or miss.
+- TYPE: exactly one of Fiscal/Policy, Monetary/RBI, Commodity, Geopolitical,
+  Corporate/Earnings, Global, Other.
+- IMPACT: Bullish / Bearish / Mixed for Indian equities.
 - Do NOT invent events no headline supports. If a single vague headline only
-  hints at something, still include it but end the description with
+  hints at something, include it but end the description with
   "(single vague headline — unconfirmed)".
-- If the headlines contain no clear market-moving event, output exactly:
+- If headlines contain no clear new event, output exactly:
   "No distinct market-moving events identified."
 
 Output ONLY a Markdown table with these columns:
@@ -727,11 +787,40 @@ Output ONLY a Markdown table with these columns:
 No preamble, no commentary before or after the table."""
 
 
-def extract_news_events(news):
+def find_prior_report():
+    """Return the most recent prior long-form report's content, or None.
+    Excludes today's report (if already written). Used to feed the Haiku
+    news extractor temporal context so it can distinguish NEW events from
+    CONTINUING coverage of prior-week events."""
+    today_str = date.today().strftime('%Y-%m-%d')
+    try:
+        files = sorted(
+            f for f in os.listdir(OUT_DIR)
+            if f.endswith('_market-intel_long.md') and not f.startswith(today_str)
+        )
+    except FileNotFoundError:
+        return None
+    if not files:
+        return None
+    path = os.path.join(OUT_DIR, files[-1])
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        print(f"  prior report: {files[-1]} ({len(content):,} chars)")
+        return content
+    except Exception as e:
+        print(f"  ⚠️  could not read prior report {path}: {e}")
+        return None
+
+
+def extract_news_events(news, prior_report=None):
     """Haiku pre-pass: digest raw headlines into a structured event table.
 
     Returns a Markdown table string, or None if extraction is unavailable
-    (caller falls back to the raw headline list)."""
+    (caller falls back to the raw headline list).
+
+    `prior_report` (optional) — last week's long-form report as a string;
+    enables novelty tagging (NEW vs CONTINUING) in the digest."""
     if not news:
         return None
     lines = []
@@ -739,6 +828,18 @@ def extract_news_events(news):
         src = f" ({n['source']})" if n.get('source') else ''
         lines.append(f"{i}. {n['title']}{src}")
     headline_block = '\n'.join(lines)
+    # Cap prior report size to keep the Haiku input lean — we only need it
+    # for novelty comparison, not as a primary source.
+    prior_block = ''
+    if prior_report:
+        snippet = prior_report[:12000]
+        if len(prior_report) > 12000:
+            snippet += '\n[...prior report truncated for context...]'
+        prior_block = (
+            "LAST WEEK'S REPORT (for novelty context only — events covered "
+            "here are NOT 'new this week'):\n\n"
+            f"{snippet}\n\n---\n\n"
+        )
     try:
         resp = claude.messages.create(
             model=HAIKU_MODEL,
@@ -746,7 +847,7 @@ def extract_news_events(news):
             system=NEWS_EXTRACT_PROMPT,
             messages=[{
                 'role': 'user',
-                'content': f"Headlines (past 7 days):\n\n{headline_block}",
+                'content': f"{prior_block}HEADLINES (past 7 days):\n\n{headline_block}",
             }],
         )
         digest = resp.content[0].text.strip()
@@ -772,7 +873,7 @@ def fmt_num(v, decimals=2):
     return f"{v:,.{decimals}f}"
 
 
-def build_context(macro, indexes, nifty_emas, sectors, flips, breadth, movers, earnings, signals, news, news_digest=None):
+def build_context(macro, indexes, nifty_emas, sectors, flips, breadth, movers, earnings, signals, news, news_digest=None, recent_declared=None):
     L = []
     today = date.today().strftime('%Y-%m-%d')
     L.append(f"# Weekly Market Context — {today}\n")
@@ -1014,6 +1115,26 @@ def build_context(macro, indexes, nifty_emas, sectors, flips, breadth, movers, e
         L.append("_No entry signals fired in the last 7 days._")
     L.append("")
 
+    # Recent earnings declared — the ONLY universe where "this week's earnings
+    # story" framing legitimately applies. Bellwethers NOT in this list have
+    # OLD prints (filed earlier in the quarter's reporting window); their
+    # current-week price action is NOT a fresh earnings reaction. See
+    # Section 4 'STALENESS CHECK' rule in LONG_FORM_PROMPT.
+    L.append("## Recent Earnings Declared (last 10 days)\n")
+    L.append("_The ONLY universe where 'this week's earnings story' framing "
+             "applies. Bellwethers / large-caps NOT in this list — their EPS "
+             "print is OLD (filed earlier in this quarter's reporting window); "
+             "their current-week price action is NOT a fresh earnings "
+             "reaction._\n")
+    if recent_declared:
+        for ticker, edate in recent_declared[:30]:
+            L.append(f"- {ticker} — declared {edate}")
+    else:
+        L.append("_No stocks in `earnings_calendar` with declared=true in the "
+                 "last 10 days. Treat ALL bellwether EPS prints as potentially "
+                 "OLD context, NOT current-week catalysts._")
+    L.append("")
+
     # Market-moving events digest (Haiku pre-pass over the raw headlines)
     L.append("## Market-Moving Events This Week (categorised from news headlines)\n")
     if news_digest:
@@ -1107,6 +1228,16 @@ explanation in parentheses. Examples:
   price). Find the cause in the events digest and name it explicitly — do not
   label it a generic "safe-haven bid".
 - If a data point isn't in the context, DON'T invent it.
+- **NOVELTY rule for the events digest.** The "Market-Moving Events" digest
+  tags each event's `When` column as one of: **"New this week"**,
+  **"Continuing from prior week"**, **"Upcoming (dated)"**, or
+  **"Unclear/ongoing"**. Lead the report's narrative (Sections 1, 3, 7)
+  with **New this week** and **Upcoming** events. Treat **Continuing from
+  prior week** events as background only — mention briefly ONLY if a
+  genuinely material new development occurred this week (a hike further,
+  a deadline announced, a reversal). Do NOT rehash continuing events as
+  if they were this week's main news; the reader already saw last week's
+  report.
 
 # Structure (~1400-1800 words, 9 sections)
 
@@ -1166,6 +1297,20 @@ beat/disappointment) and write a 2-3 sentence read on each:
   to confirm").
 - Sector implication ("read-through for other PSU banks", "suggests
   premium-discretionary spend is holding up", etc.).
+- **STALENESS CHECK — critical.** The EPS / Rev figures in the bellwether
+  table come from each stock's most recent reported quarter, which for many
+  large caps may have been filed **4–8 weeks ago**. The 1-day / 5-day price
+  columns are **THIS week's** price action. These two are NOT the same week.
+  Use the **"Recent Earnings Declared (last 10 days)"** section in the
+  context as the source of truth for which stocks actually reported recently:
+  - If the bellwether IS in that list → safe to frame the current-week
+    price action as a response to the earnings print.
+  - If the bellwether is NOT in that list (or the list is empty) → the
+    print is OLD. Do NOT write "Infosys's +24% EPS print drove a +5%
+    reaction this week." Instead, describe earnings and price action
+    SEPARATELY: "Infosys printed +24% EPS earlier this quarter; this
+    week's +5% move is current sector-rotation action, not a fresh
+    earnings catalyst."
 
 Do NOT mention stocks that aren't in the filtered list — they're from a
 prior quarter.
@@ -1493,12 +1638,20 @@ def main():
     news = fetch_google_news()
     print(f"  Got {len(news)} unique headlines")
 
-    print("\n🧠 Extracting market-moving events (Claude Haiku)...")
-    news_digest = extract_news_events(news)
+    print("\n📅 Recent earnings declared (gates Section 4 'fresh earnings' framing)...")
+    recent_declared = fetch_recent_declared_earnings()
+    print(f"  {len(recent_declared)} stocks declared in the last 10 days")
+
+    print("\n📚 Loading prior report for novelty context...")
+    prior_report = find_prior_report()
+    print(f"  {'Loaded' if prior_report else 'None found — events will be treated as all-new'}")
+
+    print("\n🧠 Extracting market-moving events (Claude Haiku, novelty-aware)...")
+    news_digest = extract_news_events(news, prior_report=prior_report)
     print(f"  {'Event digest built' if news_digest else 'No digest — falling back to raw headlines'}")
 
     print("\n🧱 Building context block...")
-    context = build_context(macro, indexes, nifty_emas, sectors, flips, breadth, movers, earnings, signals, news, news_digest)
+    context = build_context(macro, indexes, nifty_emas, sectors, flips, breadth, movers, earnings, signals, news, news_digest, recent_declared=recent_declared)
     os.makedirs(OUT_DIR, exist_ok=True)
     today_str = date.today().strftime('%Y-%m-%d')
     ctx_path = f'{OUT_DIR}/_context_{today_str}.md'
