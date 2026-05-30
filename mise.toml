@@ -1,0 +1,17 @@
+# Railway / Nixpacks build config — mise runtime version manager
+#
+# Pins Python explicitly (vs. relying on Nixpacks auto-detect, which can shift
+# under us if Railway changes its default). Also disables mise's GitHub
+# artifact attestation check: mise 2026.5.16 (released 2026-05-28) made this
+# mandatory by default, but no attestations exist for older Python builds
+# like 3.11.7, so the check fails and breaks Railway builds.
+#
+# Belt-and-suspenders alongside the MISE_PYTHON_GITHUB_ATTESTATIONS=false env
+# var in the Railway dashboard — this file ensures the setting survives even
+# if the Railway env var ever gets cleared.
+
+[tools]
+python = "3.11.7"
+
+[settings]
+python.github_attestations = false
