@@ -140,16 +140,24 @@ def get_instrument_mappings(kite, tickers):
                     exchange = 'BSE'
                 break
 
-        # Find instrument
+        # Find instrument — exact EQ symbol first, then NSE trade-to-trade
+        # series. Zerodha bakes the series into the tradingsymbol, so a
+        # freshly-listed stock (e.g. a demerger entity) trades as 'VAML-BE'
+        # until it graduates to the rolling EQ series. Trying the suffixed
+        # variants as a fallback self-heals automatically once that happens.
+        candidate_symbols = [symbol, f"{symbol}-BE", f"{symbol}-BZ"]
         found_inst = False
-        for inst in all_instruments:
-            if (inst['tradingsymbol'] == symbol and
-                inst['exchange'] == exchange and
-                inst['instrument_type'] == 'EQ'):
-                token = inst['instrument_token']
-                token_to_ticker[token] = yahoo_ticker
-                found.append(f"{yahoo_ticker}")
-                found_inst = True
+        for want in candidate_symbols:
+            for inst in all_instruments:
+                if (inst['tradingsymbol'] == want and
+                    inst['exchange'] == exchange and
+                    inst['instrument_type'] == 'EQ'):
+                    token = inst['instrument_token']
+                    token_to_ticker[token] = yahoo_ticker
+                    found.append(f"{yahoo_ticker}")
+                    found_inst = True
+                    break
+            if found_inst:
                 break
 
         if not found_inst:
