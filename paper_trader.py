@@ -51,6 +51,10 @@ Exit logic:
   - T1: 33% at +3R + breakeven, 33% at +6R + 2xATR trail, rest trails.
   - T2/T3/T4: 33% at +2R + breakeven, 33% at +4R + 2xATR trail, rest trails.
   - Universal: book 25% if up >25% within 15 trading days.
+  - Early trail: if MFE reaches +10% before a formal trail-arm, arm the trail
+    (locks breakeven, books nothing). Once trail-armed, the stop is the higher
+    of the 2xATR trail and a give-back floor at entry + 50% of peak MFE — so a
+    runner can't round-trip more than half its peak open gain.
   - Time stop: close if the trailing stop never armed (no 2nd R-partial and
     MFE never reached +10%) after 25 trading days — P&L-agnostic. A trade that
     hasn't reached its first trail-arming target by the deadline is dead money.
@@ -113,6 +117,8 @@ PARTIAL_QTY_PCT = 33
 # R-partial fires. Prevents a trade running to +12% and round-tripping
 # to -1R when partial targets sit at +20%. Does NOT book any profit.
 EARLY_TRAIL_PCT = 10.0
+GIVEBACK_LOCK_FRAC = 0.5  # once trail-armed, floor the stop at entry + this
+                         # fraction of the peak open gain (MFE high-water mark)
 
 # Position-count cap. With the cash gate below, this is a soft secondary
 # guard against an absurdly fragmented book — capital, not count, is the
@@ -780,11 +786,25 @@ def process_exits(sb, open_trades, today_snap, today_date):
                     current_stop = max(current_stop, entry_price)
                     breakeven_armed = True
 
-        # 4. Trailing stop update
-        if trail_armed and bar_atr:
-            new_stop = bar_close - TRAIL_ATR_MULT * bar_atr
-            if new_stop > current_stop:
-                current_stop = new_stop
+        # 4. Trailing stop update (once armed): raise the stop to the higher of
+        # the 2xATR trail and a give-back floor that locks in GIVEBACK_LOCK_FRAC
+        # of the peak open gain. The floor is anchored to the MFE high-water mark
+        # (max_unrealized_pct), so it protects fast reversals the close-following
+        # ATR trail misses. Only ever raises the stop — books no profit, so
+        # r_multiple stays clean.
+        if trail_armed:
+            if bar_atr:
+                atr_trail = bar_close - TRAIL_ATR_MULT * bar_atr
+                if atr_trail > current_stop:
+                    current_stop = atr_trail
+            if max_unrealized_pct > 0:
+                giveback_floor = entry_price * (1 + GIVEBACK_LOCK_FRAC * max_unrealized_pct / 100.0)
+                # Clamp to bar_close so the stop never sits above market (same
+                # invariant the ATR trail has): a >50%-retraced runner then exits
+                # at ~close next bar rather than booking an inflated fill.
+                giveback_floor = min(giveback_floor, bar_close)
+                if giveback_floor > current_stop:
+                    current_stop = giveback_floor
 
         # 5. Time stop — cut a trade that hasn't proven itself by the deadline.
         # "Proven" = trailing stop armed (2nd R-partial at line ~732, or the

@@ -354,8 +354,14 @@ para(
 
 h2("6.4 Trailing stop")
 para(
-    "Activated when partials_taken reaches 2 (trail_armed = true). Each EOD: "
-    "new_stop = bar_close − 2 × today's ATR_14. The stop is updated only if new_stop > current_stop."
+    "Armed when partials_taken reaches 2, OR early via the +10% MFE safety net "
+    "(EARLY_TRAIL_PCT) — whichever comes first sets trail_armed = true and locks the stop "
+    "at breakeven. Each EOD thereafter the stop is raised to the HIGHER of: (a) the 2×ATR "
+    "trail, bar_close − 2 × today's ATR_14; and (b) a give-back floor at entry_price + 0.5 × "
+    "(peak open gain), anchored to the MFE high-water mark (GIVEBACK_LOCK_FRAC = 0.5). The "
+    "floor caps round-trip on a runner to half its peak gain and protects fast reversals that "
+    "the close-following ATR trail misses. The stop only ratchets up, never down; the give-back "
+    "floor books no profit, so r_multiple stays clean."
 )
 
 h2("6.5 Time stop")
@@ -590,6 +596,8 @@ code_block(
     "SLIPPAGE_BPS          = 15          # 0.15% on entry\n"
     "STOP_ATR_MULT         = 2.0         # initial stop = 2 × ATR_14\n"
     "TRAIL_ATR_MULT        = 2.0         # trailing stop = 2 × ATR\n"
+    "EARLY_TRAIL_PCT       = 10.0        # arm trail early if MFE hits +10%\n"
+    "GIVEBACK_LOCK_FRAC    = 0.5         # floor stop at entry + 50% of peak MFE\n"
     "TIME_STOP_DAYS        = 25          # close at N days if trail never armed\n"
     "UNIVERSAL_BOOK_DAYS   = 15          # window for the 25% fast-move book\n"
     "UNIVERSAL_BOOK_PCT    = 25.0        # trigger %\n"
