@@ -51,7 +51,9 @@ Exit logic:
   - T1: 33% at +3R + breakeven, 33% at +6R + 2xATR trail, rest trails.
   - T2/T3/T4: 33% at +2R + breakeven, 33% at +4R + 2xATR trail, rest trails.
   - Universal: book 25% if up >25% within 15 trading days.
-  - Time stop: close if flat (-2%..+2%) after 25 trading days.
+  - Time stop: close if the trailing stop never armed (no 2nd R-partial and
+    MFE never reached +10%) after 25 trading days — P&L-agnostic. A trade that
+    hasn't reached its first trail-arming target by the deadline is dead money.
   - Intraday stop: zerodha_rest_updater_railway.py exits at LTP if LTP
     <= current_stop. Partials/trailing/time-stop remain EOD here.
 
@@ -101,8 +103,6 @@ SLIPPAGE_BPS = 15
 STOP_ATR_MULT = 2.0
 TRAIL_ATR_MULT = 2.0
 TIME_STOP_DAYS = 25
-TIME_STOP_LOW = -2.0
-TIME_STOP_HIGH = 2.0
 UNIVERSAL_BOOK_DAYS = 15
 UNIVERSAL_BOOK_PCT = 25.0
 UNIVERSAL_BOOK_QTY_PCT = 25
@@ -786,23 +786,27 @@ def process_exits(sb, open_trades, today_snap, today_date):
             if new_stop > current_stop:
                 current_stop = new_stop
 
-        # 5. Time stop
-        if holding_days >= TIME_STOP_DAYS:
-            unr_pct = (bar_close - entry_price) / entry_price * 100
-            if TIME_STOP_LOW <= unr_pct <= TIME_STOP_HIGH:
-                exit_qty = current_qty
-                pnl_chunk = (bar_close - entry_price) * exit_qty
-                realised_pnl += pnl_chunk
-                realised_today += pnl_chunk
-                realised_qty += exit_qty
-                current_qty = 0
-                _close_trade(sb, tr, bar_close, today_date, 'time_stop',
-                             realised_pnl, realised_qty, partials, partials_taken,
-                             current_stop, breakeven_armed, trail_armed,
-                             max_unrealized_pct, min_unrealized_pct, trail_armed_reason)
-                closed_today += 1
-                actions.append({'id': tr['id'], 'ticker': ticker, 'action': 'time_stop'})
-                continue
+        # 5. Time stop — cut a trade that hasn't proven itself by the deadline.
+        # "Proven" = trailing stop armed (2nd R-partial at line ~732, or the
+        # +EARLY_TRAIL_PCT MFE arm at line ~752). A trade that reached neither
+        # its initial SL nor its first trail-arming target within TIME_STOP_DAYS
+        # is dead money — close it to recycle capital, regardless of where its
+        # unrealised P&L sits. trail_armed is fully resolved above (sections 1-2b)
+        # before this check.
+        if holding_days >= TIME_STOP_DAYS and not trail_armed:
+            exit_qty = current_qty
+            pnl_chunk = (bar_close - entry_price) * exit_qty
+            realised_pnl += pnl_chunk
+            realised_today += pnl_chunk
+            realised_qty += exit_qty
+            current_qty = 0
+            _close_trade(sb, tr, bar_close, today_date, 'time_stop',
+                         realised_pnl, realised_qty, partials, partials_taken,
+                         current_stop, breakeven_armed, trail_armed,
+                         max_unrealized_pct, min_unrealized_pct, trail_armed_reason)
+            closed_today += 1
+            actions.append({'id': tr['id'], 'ticker': ticker, 'action': 'time_stop'})
+            continue
 
         # Update state on the open row
         _update_open_trade(

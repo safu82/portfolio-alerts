@@ -360,10 +360,12 @@ para(
 
 h2("6.5 Time stop")
 para(
-    "After 25 trading days, if the position is flat (close vs entry ∈ [−2%, +2%]), close the "
-    "residual qty at bar_close with exit_reason='time_stop'. The check runs in process_exits "
-    "AFTER the partial/trail/universal-book pass, so a position that's already partialed and "
-    "trailing isn't time-stopped unless it returns to flat."
+    "After 25 trading days, if the trade has NOT armed its trailing stop — i.e. it reached "
+    "neither its 2nd R-partial nor a +10% MFE early-trail — close the residual qty at bar_close "
+    "with exit_reason='time_stop'. The cut is P&L-agnostic: a position drifting at −4% or +6% "
+    "that never reached a trail-arming target is dead money and gets recycled. The check runs in "
+    "process_exits AFTER the partial/trail/universal-book pass, so any position that has armed its "
+    "trail (and is therefore genuinely running) is exempt."
 )
 
 h2("6.6 Intraday stop (Railway)")
@@ -381,7 +383,7 @@ table(
         ["stop", "Railway intraday OR EOD batch", "Initial stop hit (before any partial or trail)."],
         ["trail_stop", "Railway intraday OR EOD batch", "Stop hit AFTER trail was armed (i.e. after 2nd partial)."],
         ["partials_full", "EOD batch only", "Both partial targets filled the same bar; no residual."],
-        ["time_stop", "EOD batch", "25 trading days held, return in [−2%, +2%]."],
+        ["time_stop", "EOD batch", "25 trading days held with trailing stop never armed (no 2nd partial / +10% MFE)."],
         ["fill_expired", "Railway fill job", "Pending row aged > 2 trading days with no live tick."],
         ["fill_rejected_missing_atr", "Railway fill job", "entry_atr was null/0 on the pending row (shouldn't happen)."],
         ["fill_rejected_position_floor", "Railway fill job",
@@ -588,9 +590,7 @@ code_block(
     "SLIPPAGE_BPS          = 15          # 0.15% on entry\n"
     "STOP_ATR_MULT         = 2.0         # initial stop = 2 × ATR_14\n"
     "TRAIL_ATR_MULT        = 2.0         # trailing stop = 2 × ATR\n"
-    "TIME_STOP_DAYS        = 25          # trading days\n"
-    "TIME_STOP_LOW         = -2.0        # close if return ∈ [LOW, HIGH]\n"
-    "TIME_STOP_HIGH        =  2.0\n"
+    "TIME_STOP_DAYS        = 25          # close at N days if trail never armed\n"
     "UNIVERSAL_BOOK_DAYS   = 15          # window for the 25% fast-move book\n"
     "UNIVERSAL_BOOK_PCT    = 25.0        # trigger %\n"
     "UNIVERSAL_BOOK_QTY_PCT= 25          # book qty %\n"
