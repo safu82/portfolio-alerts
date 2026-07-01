@@ -156,7 +156,7 @@ table(
          "trailing stops, time stops, universal 25% book). "
          "2) Reload state; compute kill switch. "
          "3) If alive, score today's signals into T1/T2/T3/T4 buckets, apply universal gates "
-         "(sector + earnings + cooldown), insert top-ranked candidates as status='pending'. "
+         "(sector + cooldown; earnings is instrumentation-only, not a gate), insert top-ranked candidates as status='pending'. "
          "4) Write paper_equity row + paper_run_log row."],
     ],
     widths_cm=[2.4, 3.2, 4.2, 7.0],
@@ -251,11 +251,14 @@ para(
 bullet("Allowed: leading, improving.")
 bullet("Rejected: weakening, lagging, sector_unknown, sector_quadrant_missing.")
 
-h2("4.3 Earnings momentum")
+h2("4.3 Earnings verdict (instrumentation-only — NOT a gate)")
 para(
-    "Looks at the quarterly_financials JSON column on stock_fundamentals (newest first). "
-    "Requires ≥6 quarters because the test compares latest YoY against the prior-quarter YoY, "
-    "and each YoY needs the same quarter from a year ago."
+    "Earnings was removed as an entry gate on 2026-07-01: the YoY-positive-and-improving test "
+    "rejected ~76% of the universe, but ~2/3 of those rejections were over-strict artifacts "
+    "(decelerating compounders, loss→profit turnarounds, missing data), not weak fundamentals. "
+    "Every taken trade is now tagged with an entry_earnings_verdict for later A/B analysis, but "
+    "it never blocks an entry. Reads quarterly_financials on stock_fundamentals (newest first); "
+    "needs ≥6 quarters to compare latest YoY (Q[0]/Q[4]) against prior YoY (Q[1]/Q[5])."
 )
 para("Math:", bold=True)
 code_block(
@@ -263,14 +266,17 @@ code_block(
     "prior_yoy_rev   = (Q[1].revenue_cr   - Q[5].revenue_cr)   / Q[5].revenue_cr\n"
     "latest_yoy_np   = (Q[0].net_income_cr - Q[4].net_income_cr) / Q[4].net_income_cr\n"
     "prior_yoy_np    = (Q[1].net_income_cr - Q[5].net_income_cr) / Q[5].net_income_cr\n\n"
-    "PASS if:\n"
-    "  latest_yoy_rev  > 0   AND  latest_yoy_rev  > prior_yoy_rev\n"
-    "  latest_yoy_np   > 0   AND  latest_yoy_np   > prior_yoy_np"
+    "verdict:\n"
+    "  pass         latest_yoy_rev>0 AND >prior  AND  latest_yoy_np>0 AND >prior\n"
+    "  decelerating growing but latest_yoy <= prior_yoy (rev or np)\n"
+    "  weak         latest_yoy_rev <= 0  OR  latest_yoy_np <= 0\n"
+    "  turnaround   a year-ago quarter <= 0 (YoY% undefined)\n"
+    "  missing      <6 quarters, or a NULL in Q[0]/Q[1]/Q[4]/Q[5]"
 )
 para(
-    "Reject reasons surfaced in the funnel: quarters_<N>, revenue_yoy_not_positive, "
-    "revenue_yoy_not_improving, profit_yoy_not_positive, profit_yoy_not_improving, "
-    "revenue_data_incomplete, profit_data_incomplete, fundamentals_missing.",
+    "The funnel records a verdict distribution (earnings_verdicts) instead of rejections, and "
+    "each trade row carries entry_earnings_verdict — so we can later compare outcomes of pass vs "
+    "weak/decelerating/turnaround trades and decide whether a narrow gate is worth restoring.",
     italic=True,
 )
 

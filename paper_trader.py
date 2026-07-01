@@ -25,9 +25,12 @@ Universal gates (all buckets):
   - Sector gate: ticker's sector must be gate_eligible (clears the breadth
     floor + min stock count) AND rank in the top SECTOR_GATE_TOP_N eligible
     sectors by composite score (get_all_sector_rankings RPC).
-  - Earnings filter: latest quarter YoY positive AND improving for BOTH
-    revenue and net profit (latest YoY > prior YoY). Requires >=6 quarters
-    in stock_fundamentals.quarterly_financials; reject otherwise.
+  - Earnings: NOT a gate (removed 2026-07-01). The old YoY-positive-and-
+    improving test rejected ~76% of the universe, but ~2/3 of those were
+    over-strict artifacts (decelerating compounders, loss->profit turnarounds,
+    missing data), not weak fundamentals. Now instrumentation-only: every trade
+    is tagged entry_earnings_verdict (pass/decelerating/weak/turnaround/missing)
+    for A/B analysis, never acted on.
   - Not in real holdings, not in open paper, 21-trading-day cooldown
     after a close.
   - Position floor Rs 40k, sector concentration <=25%, <=20 open,
@@ -528,41 +531,34 @@ def passes_sector_filter(ticker, sector_map, sector_rankings):
     return True, None
 
 
-def passes_earnings_filter(ticker, fundamentals_map):
-    """Latest YoY positive AND > prior YoY, for BOTH revenue and net profit.
-    quarterly_financials is newest-first (Q[0] = latest)."""
+def earnings_verdict(ticker, fundamentals_map):
+    """Earnings is instrumentation-only now (removed as a hard gate 2026-07-01).
+    Returns a coarse category so taken trades can be A/B-sliced later — do the
+    'weak' ones actually underperform? quarterly_financials is newest-first
+    (Q[0] = latest); YoY compares Q0/Q4 (latest) and Q1/Q5 (prior year).
+
+      pass         - rev AND profit YoY positive AND accelerating (old gate PASS)
+      decelerating - growing but latest YoY <= prior YoY (e.g. tough comp)
+      weak         - rev or profit YoY negative (genuinely declining)
+      turnaround   - year-ago quarter was a loss/zero base, YoY% undefined
+      missing      - <6 quarters, or a NULL revenue/net_income in Q0/Q1/Q4/Q5
+    """
     qf = fundamentals_map.get(ticker)
-    if not qf:
-        return False, 'fundamentals_missing'
-    if len(qf) < EARNINGS_MIN_QUARTERS:
-        return False, f'quarters_{len(qf)}'
-
-    def yoy(q_now, q_yr_ago, key):
-        a = to_float(q_now.get(key))
-        b = to_float(q_yr_ago.get(key))
-        if a is None or b is None or b <= 0:
-            return None
-        return (a - b) / b
-
-    latest_rev = yoy(qf[0], qf[4], 'revenue_cr')
-    prior_rev  = yoy(qf[1], qf[5], 'revenue_cr')
-    latest_np  = yoy(qf[0], qf[4], 'net_income_cr')
-    prior_np   = yoy(qf[1], qf[5], 'net_income_cr')
-
-    if latest_rev is None or prior_rev is None:
-        return False, 'revenue_data_incomplete'
-    if latest_np is None or prior_np is None:
-        return False, 'profit_data_incomplete'
-
-    if latest_rev <= 0:
-        return False, 'revenue_yoy_not_positive'
-    if latest_rev <= prior_rev:
-        return False, 'revenue_yoy_not_improving'
-    if latest_np <= 0:
-        return False, 'profit_yoy_not_positive'
-    if latest_np <= prior_np:
-        return False, 'profit_yoy_not_improving'
-    return True, None
+    if not qf or len(qf) < EARNINGS_MIN_QUARTERS:
+        return 'missing'
+    r0, r1, r4, r5 = (to_float(qf[i].get('revenue_cr')) for i in (0, 1, 4, 5))
+    n0, n1, n4, n5 = (to_float(qf[i].get('net_income_cr')) for i in (0, 1, 4, 5))
+    if any(v is None for v in (r0, r1, r4, r5, n0, n1, n4, n5)):
+        return 'missing'
+    if r4 <= 0 or r5 <= 0 or n4 <= 0 or n5 <= 0:
+        return 'turnaround'
+    lr, pr = (r0 - r4) / r4, (r1 - r5) / r5
+    ln, pn = (n0 - n4) / n4, (n1 - n5) / n5
+    if lr <= 0 or ln <= 0:
+        return 'weak'
+    if lr <= pr or ln <= pn:
+        return 'decelerating'
+    return 'pass'
 
 
 def size_position(tier, entry_price, atr):
@@ -975,6 +971,7 @@ def process_entries(sb, candidates, today_snap, today_date, holdings,
             ),
             'signal_ids': c['signal_ids'],
             'signal_score': round(c['signal_score'], 2),
+            'entry_earnings_verdict': c.get('earnings_verdict'),
             'entry_date': today_date.isoformat(),  # scan date; fill job updates to D1
             'entry_price': round(est_entry_price, 4),  # placeholder, fill recomputes
             'entry_atr': round(atr14, 4),
@@ -1102,13 +1099,13 @@ def main():
     funnel = {
         'signal_rows': 0, 'unique_tickers': 0,
         'no_bucket': 0,
-        'sector_rejected': 0, 'earnings_rejected': 0,
+        'sector_rejected': 0,
         'in_holdings': 0, 'in_cooldown': 0, 'already_open': 0,
         'qualified': 0, 'inserted': 0,
         'qty_zero_rejected': 0, 'cash_rejected': 0, 'sector_conc_rejected': 0,
         'deployed_pct': 0, 'deployed_inr': 0,
         'bucket_counts': {},
-        'sector_reasons': {}, 'earnings_reasons': {},
+        'sector_reasons': {}, 'earnings_verdicts': {},
     }
     errors = []
 
@@ -1246,13 +1243,12 @@ def main():
                         funnel['sector_reasons'].get(sec_reason, 0) + 1
                     )
                     continue
-                e_ok, e_reason = passes_earnings_filter(ticker, fundamentals)
-                if not e_ok:
-                    funnel['earnings_rejected'] += 1
-                    funnel['earnings_reasons'][e_reason] = (
-                        funnel['earnings_reasons'].get(e_reason, 0) + 1
-                    )
-                    continue
+                # Earnings is instrumentation-only (removed as a gate 2026-07-01):
+                # tag the verdict for the A/B, never reject on it.
+                c['earnings_verdict'] = earnings_verdict(ticker, fundamentals)
+                funnel['earnings_verdicts'][c['earnings_verdict']] = (
+                    funnel['earnings_verdicts'].get(c['earnings_verdict'], 0) + 1
+                )
                 funnel['bucket_counts'][c['tier']] = (
                     funnel['bucket_counts'].get(c['tier'], 0) + 1
                 )

@@ -22,7 +22,7 @@ from paper_trader import (
     load_sector_rankings, load_presignals, load_entry_signals,
     load_fundamentals, load_recent_equity, load_cumulative_closed_pnl,
     group_signals_by_ticker, classify_entry_bucket, classify_presignal_bucket,
-    passes_sector_filter, passes_earnings_filter, size_position,
+    passes_sector_filter, earnings_verdict, size_position,
     positions_mtm, open_capital_tied, kill_switch,
     to_float,
 )
@@ -101,11 +101,11 @@ def main():
         'unique_tickers': len(by_ticker),
         'no_bucket': 0,
         'in_holdings': 0, 'in_cooldown': 0, 'already_open': 0,
-        'sector_rejected': 0, 'earnings_rejected': 0,
+        'sector_rejected': 0,
         'qualified': 0,
         'bucket_counts_raw': {},
         'bucket_counts_qualified': {},
-        'sector_reasons': {}, 'earnings_reasons': {},
+        'sector_reasons': {}, 'earnings_verdicts': {},
     }
 
     raw_candidates = []
@@ -162,14 +162,12 @@ def main():
             )
             rejected.append((ticker, c['tier'], f'sector:{sec_reason}'))
             continue
-        e_ok, e_reason = passes_earnings_filter(ticker, fundamentals)
-        if not e_ok:
-            funnel['earnings_rejected'] += 1
-            funnel['earnings_reasons'][e_reason] = (
-                funnel['earnings_reasons'].get(e_reason, 0) + 1
-            )
-            rejected.append((ticker, c['tier'], f'earnings:{e_reason}'))
-            continue
+        # Earnings is instrumentation-only (removed as a gate 2026-07-01):
+        # tag the verdict, never reject on it.
+        c['earnings_verdict'] = earnings_verdict(ticker, fundamentals)
+        funnel['earnings_verdicts'][c['earnings_verdict']] = (
+            funnel['earnings_verdicts'].get(c['earnings_verdict'], 0) + 1
+        )
         funnel['bucket_counts_qualified'][c['tier']] = (
             funnel['bucket_counts_qualified'].get(c['tier'], 0) + 1
         )
