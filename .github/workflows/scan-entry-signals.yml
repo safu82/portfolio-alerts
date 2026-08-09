@@ -27,3 +27,28 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+  notify:
+    name: Telegram notification
+    runs-on: ubuntu-latest
+    needs: scan-signals
+    if: always()
+    steps:
+      - name: Send Telegram message
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STATUS: ${{ needs.scan-signals.result }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$STATUS" = "success" ]; then
+            EMOJI="✅"; TITLE="Entry signals scan OK"
+          else
+            EMOJI="❌"; TITLE="Entry signals scan FAILED"
+          fi
+          printf -v MSG '%s <b>%s</b>\nstatus: %s\n\n<a href="%s">view run</a>' "$EMOJI" "$TITLE" "$STATUS" "$RUN_URL"
+          curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TG_CHAT}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "text=${MSG}" \
+            --data-urlencode "disable_web_page_preview=true"
