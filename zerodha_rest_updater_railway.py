@@ -11,6 +11,7 @@ UPDATED April 2026:
 """
 
 from kiteconnect import KiteConnect
+from kiteconnect.exceptions import TokenException
 from supabase import create_client
 from datetime import date, datetime
 import os
@@ -36,8 +37,16 @@ from paper_trader import (
 ZERODHA_API_KEY = os.environ.get('ZERODHA_API_KEY')
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
 PENDING_MAX_TRADING_DAYS = 2
+
+# Token-rejection handling: reload from Supabase and retry every minute,
+# re-alerting on Telegram at most every 30 min while it stays broken.
+TOKEN_RETRY_SECONDS = 60
+TOKEN_ALERT_REPEAT_SECONDS = 1800
+_token_error = {'since': None, 'last_alert': 0}
 
 # Initialize
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -71,6 +80,59 @@ def get_access_token_from_supabase():
     except Exception as e:
         print(f"❌ Error fetching token from Supabase: {e}")
     return None
+
+
+def send_telegram(text):
+    """Best-effort Telegram alert; silently skipped if the bot isn't configured."""
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            data={'chat_id': TELEGRAM_CHAT_ID, 'parse_mode': 'HTML', 'text': text,
+                  'disable_web_page_preview': 'true'},
+            timeout=10,
+        )
+    except Exception as e:
+        print(f"⚠️  Telegram send failed: {e}")
+
+
+def handle_token_rejected(kite, error):
+    """Zerodha rejected the access token mid-session (logout, password/TOTP
+    change, or a revoked session). Reload whatever is in Supabase and re-apply
+    it — a re-run of the token refresh can revive the same token string, so
+    re-apply even if the value hasn't changed."""
+    now_ts = time.time()
+    if _token_error['since'] is None:
+        _token_error['since'] = now_ts
+    print(f"🔑 Zerodha rejected access token: {error} — reloading from Supabase, "
+          f"retry in {TOKEN_RETRY_SECONDS}s")
+
+    if now_ts - _token_error['last_alert'] >= TOKEN_ALERT_REPEAT_SECONDS:
+        since = datetime.fromtimestamp(_token_error['since'], ist).strftime('%H:%M')
+        send_telegram(
+            "❌ <b>Live prices stopped — Zerodha token rejected</b>\n"
+            f"since: {since} IST\nerror: {error}\n\n"
+            "Fix: run <b>Daily Zerodha Token Refresh</b> in GitHub Actions. "
+            "The updater reloads the token automatically every minute — no restart needed."
+        )
+        _token_error['last_alert'] = now_ts
+
+    fresh = get_access_token_from_supabase()
+    if fresh and kite:
+        kite.set_access_token(fresh)
+    return fresh
+
+
+def note_token_recovered():
+    """Called after a successful quote fetch; alerts once if we were in a token outage."""
+    if _token_error['since'] is None:
+        return
+    mins = int((time.time() - _token_error['since']) / 60)
+    print(f"✅ Zerodha token accepted again after {mins} min outage")
+    send_telegram(f"✅ <b>Live prices resumed</b>\nZerodha token accepted again after {mins} min.")
+    _token_error['since'] = None
+    _token_error['last_alert'] = 0
 
 def get_portfolio_tickers():
     """Get all tickers from portfolio and transactions"""
@@ -228,6 +290,8 @@ def fetch_and_update_prices(kite, token_to_ticker):
 
         return 0
 
+    except TokenException:
+        raise  # main loop reloads the token and alerts
     except Exception as e:
         print(f"❌ Error fetching prices: {e}")
         return 0
@@ -661,7 +725,13 @@ def main():
 
             # ── Live price update ─────────────────────────────────────────
             if kite and token_to_ticker:
-                updated = fetch_and_update_prices(kite, token_to_ticker)
+                try:
+                    updated = fetch_and_update_prices(kite, token_to_ticker)
+                except TokenException as e:
+                    access_token = handle_token_rejected(kite, e) or access_token
+                    time.sleep(TOKEN_RETRY_SECONDS)
+                    continue
+                note_token_recovered()
                 fetch_and_update_index_prices(kite)  # NIFTY 50, NIFTY 500, USDINR
                 # Fill must run before stops on a fresh fill: pending → open
                 # with the actual D1 entry price + ATR-derived stop.
@@ -711,6 +781,11 @@ def main():
         except KeyboardInterrupt:
             print("\n\n👋 Shutting down...")
             break
+        except TokenException as e:
+            # Token rejected during session init (e.g. instrument download) —
+            # last_market_session isn't set yet, so the next pass reloads it.
+            handle_token_rejected(None, e)
+            time.sleep(TOKEN_RETRY_SECONDS)
         except Exception as e:
             print(f"\n❌ Error in main loop: {e}")
             print("Retrying in 30 seconds...")
