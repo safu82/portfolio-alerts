@@ -48,6 +48,14 @@ TOKEN_RETRY_SECONDS = 60
 TOKEN_ALERT_REPEAT_SECONDS = 1800
 _token_error = {'since': None, 'last_alert': 0}
 
+# One-off exchange sessions outside the normal Mon-Fri 9:15-15:30 window.
+# date -> ((start_hour, start_min), (end_hour, end_min)) IST
+SPECIAL_SESSIONS = {
+    # Diwali Muhurat (Sunday): continuous trading from 14:20, closing auction
+    # to about 15:35. Run past it so live_prices holds the final closing prices.
+    date(2026, 11, 8): ((14, 20), (15, 40)),
+}
+
 # Initialize
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 ist = pytz.timezone('Asia/Kolkata')
@@ -232,12 +240,18 @@ def get_instrument_mappings(kite, tickers):
     return token_to_ticker
 
 def is_market_open():
-    """Check if market is currently open (9:15 AM - 3:30 PM IST, Mon-Fri)"""
+    """Check if market is currently open (9:15 AM - 3:30 PM IST, Mon-Fri,
+    or the hours of a SPECIAL_SESSIONS date)"""
     now = datetime.now(ist)
-    if now.weekday() >= 5:
+    special = SPECIAL_SESSIONS.get(now.date())
+    if special:
+        (start_h, start_m), (end_h, end_m) = special
+    elif now.weekday() >= 5:
         return False
-    market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
-    market_end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    else:
+        (start_h, start_m), (end_h, end_m) = (9, 15), (15, 30)
+    market_start = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+    market_end = now.replace(hour=end_h, minute=end_m, second=0, microsecond=0)
     return market_start <= now <= market_end
 
 def fetch_and_update_prices(kite, token_to_ticker):
@@ -660,7 +674,7 @@ def main():
             market_cap_window_start = now.replace(hour=15, minute=45, second=0, microsecond=0).time()
             market_cap_window_end   = now.replace(hour=16, minute=0,  second=0, microsecond=0).time()
 
-            if (now.weekday() < 5 and
+            if ((now.weekday() < 5 or current_date in SPECIAL_SESSIONS) and
                     market_cap_window_start <= now_time <= market_cap_window_end and
                     market_cap_fetched_today != current_date):
                 print(f"\n📊 Fetching NSE market cap for {current_date}...")
