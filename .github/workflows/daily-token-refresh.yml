@@ -4,14 +4,28 @@ on:
   schedule:
     # 5:37 AM IST (00:07 UTC) every day — off-hour to avoid cron delay
     - cron: '7 0 * * *'
-  
-  # Allow manual trigger from GitHub Actions UI
+
+  # Allow manual trigger from GitHub Actions UI. cron-job.org also dispatches
+  # this at 06:30 IST (full refresh) and 09:05 IST Mon-Fri with
+  # only_if_invalid=true (pre-open check: refresh only if Zerodha rejects the
+  # stored token, as happened on 2026-11-05 and 2026-11-17).
   workflow_dispatch:
+    inputs:
+      only_if_invalid:
+        description: 'Only refresh if Zerodha rejects the stored token'
+        type: boolean
+        default: false
 
 jobs:
   refresh-token:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      token_was_valid: ${{ steps.precheck.outputs.valid }}
+    env:
+      ZERODHA_API_KEY: ${{ secrets.ZERODHA_API_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
 
     steps:
       - name: Checkout code
@@ -22,29 +36,41 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Chrome
-        uses: browser-actions/setup-chrome@latest
-        with:
-          chrome-version: stable
-
       - name: Install Python dependencies
         run: |
           pip install selenium webdriver-manager pyotp python-dotenv kiteconnect supabase
 
+      - name: Check stored token with Zerodha
+        id: precheck
+        if: github.event.inputs.only_if_invalid == 'true'
+        run: |
+          if python validate_zerodha_token.py; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+            echo "Token accepted — no refresh needed"
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            echo "Token not accepted — refreshing"
+          fi
+
+      - name: Install Chrome
+        if: steps.precheck.outputs.valid != 'true'
+        uses: browser-actions/setup-chrome@latest
+        with:
+          chrome-version: stable
+
       - name: Run Zerodha token automation
+        if: steps.precheck.outputs.valid != 'true'
         env:
-          ZERODHA_API_KEY: ${{ secrets.ZERODHA_API_KEY }}
           ZERODHA_API_SECRET: ${{ secrets.ZERODHA_API_SECRET }}
           ZERODHA_USER_ID: ${{ secrets.ZERODHA_USER_ID }}
           ZERODHA_PASSWORD: ${{ secrets.ZERODHA_PASSWORD }}
           ZERODHA_TOTP_SECRET: ${{ secrets.ZERODHA_TOTP_SECRET }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           HEADLESS: true
         run: |
           python zerodha_auto_token_with_supabase.py
 
       - name: Verify token was saved
+        if: steps.precheck.outputs.valid != 'true'
         run: |
           if [ -f zerodha_access_token.txt ]; then
             echo "✅ Token file created successfully"
@@ -53,6 +79,13 @@ jobs:
             echo "❌ Token file not found - automation may have failed"
             exit 1
           fi
+
+      # A successful login doesn't prove the token works: check the copy in
+      # Supabase (what Railway reads) against Zerodha itself.
+      - name: Validate token with Zerodha
+        if: steps.precheck.outputs.valid != 'true'
+        run: |
+          python validate_zerodha_token.py
 
       - name: Notify on failure
         if: failure()
@@ -65,17 +98,21 @@ jobs:
     name: Telegram notification
     runs-on: ubuntu-latest
     needs: refresh-token
-    if: always()
+    # Stay quiet when the pre-open check found the token already working.
+    if: always() && needs.refresh-token.outputs.token_was_valid != 'true'
     steps:
       - name: Send Telegram message
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           STATUS: ${{ needs.refresh-token.result }}
+          PRECHECK: ${{ github.event.inputs.only_if_invalid }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          if [ "$STATUS" = "success" ]; then
-            EMOJI="✅"; TITLE="Zerodha token refresh OK"
+          if [ "$STATUS" = "success" ] && [ "$PRECHECK" = "true" ]; then
+            EMOJI="⚠️"; TITLE="Zerodha rejected the token before open — refreshed and validated"
+          elif [ "$STATUS" = "success" ]; then
+            EMOJI="✅"; TITLE="Zerodha token refresh OK (validated)"
           else
             EMOJI="❌"; TITLE="Zerodha token refresh FAILED"
           fi
